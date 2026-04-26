@@ -8,6 +8,12 @@ import {
   WorkshopCatalogServiceUpdateRequest,
 } from './workshop-catalog.models';
 
+function assertPositiveInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid ${name}: must be a positive integer.`);
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class WorkshopCatalogApi {
   private readonly http = inject(HttpClient);
@@ -35,6 +41,7 @@ export class WorkshopCatalogApi {
     catalogId: number,
     payload: WorkshopCatalogServiceUpdateRequest,
   ) {
+    assertPositiveInteger(catalogId, 'catalogId');
     return this.http.put<WorkshopCatalogServiceResponse>(
       buildApiUrl(`/workshop/catalog/${catalogId}`),
       payload,
@@ -42,6 +49,7 @@ export class WorkshopCatalogApi {
   }
 
   deactivateCatalogService(catalogId: number) {
+    assertPositiveInteger(catalogId, 'catalogId');
     return this.http.patch<WorkshopCatalogServiceResponse>(
       buildApiUrl(`/workshop/catalog/${catalogId}/deactivate`),
       {},
@@ -49,6 +57,7 @@ export class WorkshopCatalogApi {
   }
 
   activateCatalogService(catalogId: number) {
+    assertPositiveInteger(catalogId, 'catalogId');
     return this.http.patch<WorkshopCatalogServiceResponse>(
       buildApiUrl(`/workshop/catalog/${catalogId}/activate`),
       {},

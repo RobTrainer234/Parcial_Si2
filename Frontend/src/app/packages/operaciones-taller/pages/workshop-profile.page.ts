@@ -968,14 +968,46 @@ export class WorkshopProfilePage {
       return;
     }
 
+    const rawValue = this.profileForm.getRawValue();
+    const latitud = Number(rawValue.latitud);
+    const longitud = Number(rawValue.longitud);
+    const radio_accion_km = Number(rawValue.radio_accion_km);
+    const nombre_comercial = String(rawValue.nombre_comercial ?? '').trim();
+
+    if (!Number.isFinite(latitud) || latitud < -90 || latitud > 90) {
+      this.saveError.set('La latitud debe ser un número válido entre -90 y 90.');
+      return;
+    }
+
+    if (!Number.isFinite(longitud) || longitud < -180 || longitud > 180) {
+      this.saveError.set('La longitud debe ser un número válido entre -180 y 180.');
+      return;
+    }
+
+    if (!Number.isFinite(radio_accion_km) || radio_accion_km <= 0) {
+      this.saveError.set('El radio de acción debe ser un número válido mayor a 0.');
+      return;
+    }
+
+    if (nombre_comercial.length === 0) {
+      this.saveError.set('El nombre comercial no puede estar vacío.');
+      return;
+    }
+
+    const specialty_ids = currentProfile.specialties.map((item) => item.id_especialidad);
+    if (specialty_ids.length === 0) {
+      this.saveError.set('El perfil debe tener al menos una especialidad activa.');
+      return;
+    }
+
     const payload: WorkshopProfileUpdateRequest = {
-      nombre_comercial: String(this.profileForm.getRawValue().nombre_comercial ?? '').trim(),
-      descripcion: this.normalizeOptionalText(this.profileForm.getRawValue().descripcion),
-      latitud: Number(this.profileForm.getRawValue().latitud),
-      longitud: Number(this.profileForm.getRawValue().longitud),
-      radio_accion_km: Number(this.profileForm.getRawValue().radio_accion_km),
-      specialty_ids: currentProfile.specialties.map((item) => item.id_especialidad),
-      acepta_seguro_propio: Boolean(this.profileForm.getRawValue().acepta_seguro_propio),
+      nombre_comercial,
+      descripcion: this.normalizeOptionalText(rawValue.descripcion),
+      latitud,
+      longitud,
+      radio_accion_km,
+      specialty_ids,
+      acepta_seguro_propio: Boolean(rawValue.acepta_seguro_propio),
     };
 
     this.saving.set(true);
@@ -1061,6 +1093,16 @@ export class WorkshopProfilePage {
 
   protected deactivateMedia(file: WorkshopMediaFileResponse): void {
     if (this.mediaUploading()) {
+      return;
+    }
+
+    if (!Number.isInteger(file.id_taller_archivo) || file.id_taller_archivo <= 0) {
+      const errorMsg = 'ID de archivo inválido.';
+      if (file.tipo_archivo === 'IMAGEN_TALLER') {
+        this.imageUploadError.set(errorMsg);
+      } else {
+        this.certificateUploadError.set(errorMsg);
+      }
       return;
     }
 

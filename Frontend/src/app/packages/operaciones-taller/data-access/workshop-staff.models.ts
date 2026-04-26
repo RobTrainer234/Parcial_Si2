@@ -35,7 +35,13 @@ export interface WorkshopStaffCreateRequest {
   specialties: StaffSpecialtyInput[];
 }
 
+export type StaffAvailabilityStatus =
+  | 'DISPONIBLE'
+  | 'EN_SERVICIO'
+  | 'NO_DISPONIBLE'
+  | 'BAJA';
+
 export interface WorkshopStaffAvailabilityUpdateRequest {
-  new_status: 'DISPONIBLE' | 'EN_SERVICIO' | 'NO_DISPONIBLE' | 'BAJA';
+  new_status: StaffAvailabilityStatus;
   reason?: string | null;
 }

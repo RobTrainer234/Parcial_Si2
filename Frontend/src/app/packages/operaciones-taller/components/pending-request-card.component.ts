@@ -79,14 +79,14 @@ import { WorkshopRequestSummary } from '../data-access/workshop-request.models';
         <button
           type="button"
           class="app-button"
-          (click)="accept.emit(request())"
+          (click)="onAccept()"
         >
           Aceptar
         </button>
         <button
           type="button"
           class="app-button app-button--secondary"
-          (click)="reject.emit(request())"
+          (click)="onReject()"
         >
           Rechazar
         </button>
@@ -155,6 +155,18 @@ export class PendingRequestCardComponent {
   readonly request = input.required<WorkshopRequestSummary>();
   readonly accept = output<WorkshopRequestSummary>();
   readonly reject = output<WorkshopRequestSummary>();
+
+  protected onAccept(): void {
+    if (Number.isInteger(this.request().request_id) && this.request().request_id > 0) {
+      this.accept.emit(this.request());
+    }
+  }
+
+  protected onReject(): void {
+    if (Number.isInteger(this.request().request_id) && this.request().request_id > 0) {
+      this.reject.emit(this.request());
+    }
+  }
 
   protected readonly severityLabel = computed(() => {
     const value = this.request().severity;

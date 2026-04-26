@@ -8,6 +8,12 @@ import {
   WorkshopStaffSummary,
 } from './workshop-staff.models';
 
+function assertPositiveInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid ${name}: must be a positive integer.`);
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class WorkshopStaffApi {
   private readonly http = inject(HttpClient);
@@ -24,6 +30,7 @@ export class WorkshopStaffApi {
     operarioId: number,
     payload: WorkshopStaffAvailabilityUpdateRequest,
   ) {
+    assertPositiveInteger(operarioId, 'operarioId');
     return this.http.patch<WorkshopStaffSummary>(
       buildApiUrl(`/workshop/staff/${operarioId}/availability`),
       payload,

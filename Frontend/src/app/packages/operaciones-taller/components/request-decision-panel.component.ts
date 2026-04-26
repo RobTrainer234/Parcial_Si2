@@ -39,7 +39,7 @@ export type RequestDecisionMode = 'accept' | 'reject' | null;
           <button
             type="button"
             class="app-button app-button--secondary"
-            (click)="cancel.emit()"
+            (click)="onCancel()"
             [disabled]="submitting()"
           >
             Cancelar
@@ -79,7 +79,7 @@ export type RequestDecisionMode = 'accept' | 'reject' | null;
           <button
             type="button"
             class="app-button app-button--secondary"
-            (click)="cancel.emit()"
+            (click)="onCancel()"
             [disabled]="submitting()"
           >
             Cancelar
@@ -152,6 +152,12 @@ export class RequestDecisionPanelComponent {
     return (event.target as HTMLTextAreaElement | null)?.value ?? '';
   }
 
+  protected onCancel(): void {
+    this.reason.set('');
+    this.validationMessage.set('');
+    this.cancel.emit();
+  }
+
   protected submitReject(): void {
     const trimmed = this.reason().trim();
     if (trimmed.length < 5) {
@@ -163,5 +169,6 @@ export class RequestDecisionPanelComponent {
 
     this.validationMessage.set('');
     this.confirmReject.emit(trimmed);
+    this.reason.set('');
   }
 }

@@ -3,6 +3,7 @@ import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
 
+import { API_BASE_URL } from '../config/api.config';
 import { AuthService } from '../auth/auth.service';
 
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
@@ -10,7 +11,9 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const router = inject(Router);
   const token = authService.getToken();
 
-  const requestWithAuth = token
+  const isBackendRequest = request.url.startsWith(API_BASE_URL) || request.url.startsWith('/');
+
+  const requestWithAuth = token && isBackendRequest
     ? request.clone({
         setHeaders: {
           Authorization: `Bearer ${token}`,

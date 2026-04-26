@@ -82,10 +82,14 @@ import { OperarioCandidateSummary } from '../data-access/workshop-assignment.mod
               <button
                 type="button"
                 class="app-button"
-                (click)="assign.emit(candidate)"
+                [disabled]="!isValidCandidate(candidate)"
+                (click)="onAssign(candidate)"
               >
                 Asignar
               </button>
+              @if (!isValidCandidate(candidate)) {
+                <small class="text-muted text-block">No disponible para asignación</small>
+              }
             </div>
           </article>
         }
@@ -173,6 +177,11 @@ import { OperarioCandidateSummary } from '../data-access/workshop-assignment.mod
           width: 100%;
         }
       }
+
+      .text-block {
+        display: block;
+        margin-top: var(--space-2);
+      }
     `,
   ],
 })
@@ -181,4 +190,18 @@ export class OperarioCandidatesTableComponent {
   readonly loading = input(false);
   readonly errorMessage = input('');
   readonly assign = output<OperarioCandidateSummary>();
+
+  protected isValidCandidate(candidate: OperarioCandidateSummary): boolean {
+    return (
+      Number.isInteger(candidate.id_persona_operario) &&
+      candidate.id_persona_operario > 0 &&
+      candidate.estado_disponibilidad === 'DISPONIBLE'
+    );
+  }
+
+  protected onAssign(candidate: OperarioCandidateSummary): void {
+    if (this.isValidCandidate(candidate)) {
+      this.assign.emit(candidate);
+    }
+  }
 }

@@ -623,6 +623,11 @@ export class WorkshopCatalogPage {
   }
 
   protected startEdit(item: WorkshopCatalogServiceResponse): void {
+    if (!Number.isInteger(item.catalog_id) || item.catalog_id <= 0) {
+      this.pageError.set('ID de catálogo inválido.');
+      return;
+    }
+
     this.formMode.set('edit');
     this.editingCatalogId.set(item.catalog_id);
     this.formError.set('');
@@ -663,12 +668,42 @@ export class WorkshopCatalogPage {
     }
 
     const rawValue = this.catalogForm.getRawValue();
+    const id_especialidad = Number(rawValue.id_especialidad);
+    const precio_base_min = Number(rawValue.precio_base_min);
+    const precio_base_max = Number(rawValue.precio_base_max);
+    const nombre = String(rawValue.nombre ?? '').trim();
+
+    if (!Number.isInteger(id_especialidad) || id_especialidad <= 0) {
+      this.formError.set('Especialidad inválida.');
+      return;
+    }
+
+    if (!Number.isFinite(precio_base_min) || precio_base_min < 0) {
+      this.formError.set('El precio mínimo debe ser un número válido y no negativo.');
+      return;
+    }
+
+    if (!Number.isFinite(precio_base_max) || precio_base_max < 0) {
+      this.formError.set('El precio máximo debe ser un número válido y no negativo.');
+      return;
+    }
+
+    if (precio_base_max < precio_base_min) {
+      this.formError.set('El precio máximo debe ser mayor o igual al mínimo.');
+      return;
+    }
+
+    if (nombre.length === 0) {
+      this.formError.set('El nombre del servicio no puede estar vacío.');
+      return;
+    }
+
     const basePayload: WorkshopCatalogServiceCreateRequest = {
-      id_especialidad: Number(rawValue.id_especialidad),
-      nombre: String(rawValue.nombre ?? '').trim(),
+      id_especialidad,
+      nombre,
       descripcion: this.normalizeOptionalText(rawValue.descripcion),
-      precio_base_min: Number(rawValue.precio_base_min),
-      precio_base_max: Number(rawValue.precio_base_max),
+      precio_base_min,
+      precio_base_max,
       incluye_repuestos_basicos: Boolean(rawValue.incluye_repuestos_basicos),
     };
 
@@ -728,6 +763,11 @@ export class WorkshopCatalogPage {
       return;
     }
 
+    if (!Number.isInteger(item.catalog_id) || item.catalog_id <= 0) {
+      this.pageError.set('ID de catálogo inválido.');
+      return;
+    }
+
     const confirmed = window.confirm(
       `¿Desactivar el servicio "${item.nombre}" del catálogo?`,
     );
@@ -758,6 +798,11 @@ export class WorkshopCatalogPage {
 
   protected activate(item: WorkshopCatalogServiceResponse): void {
     if (this.saving()) {
+      return;
+    }
+
+    if (!Number.isInteger(item.catalog_id) || item.catalog_id <= 0) {
+      this.pageError.set('ID de catálogo inválido.');
       return;
     }
 

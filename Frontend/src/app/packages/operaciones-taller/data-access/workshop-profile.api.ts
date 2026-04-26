@@ -8,6 +8,12 @@ import {
   WorkshopProfileUpdateRequest,
 } from './workshop-profile.models';
 
+function assertPositiveInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid ${name}: must be a positive integer.`);
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class WorkshopProfileApi {
   private readonly http = inject(HttpClient);
@@ -48,6 +54,7 @@ export class WorkshopProfileApi {
   }
 
   deactivateMedia(fileId: number) {
+    assertPositiveInteger(fileId, 'fileId');
     return this.http.patch<WorkshopMediaFileResponse>(
       buildApiUrl(`/workshop/profile/media/${fileId}/deactivate`),
       {},

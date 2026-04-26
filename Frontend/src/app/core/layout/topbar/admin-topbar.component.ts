@@ -178,7 +178,7 @@ export class AdminTopbarComponent {
   protected readonly currentTheme = this.themeService.currentTheme;
   protected readonly currentUser = this.authService.currentUser;
   protected readonly workshopId = computed(
-    () => this.currentUser()?.actor_context.taller_id ?? null,
+    () => this.currentUser()?.actor_context?.taller_id ?? null,
   );
   protected readonly currentUserEmail = computed(
     () => this.currentUser()?.email ?? 'admin@si2.local',

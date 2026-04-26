@@ -32,6 +32,7 @@ import {
 } from '../data-access/workshop-profile.models';
 import { WorkshopStaffApi } from '../data-access/workshop-staff.api';
 import {
+  StaffAvailabilityStatus,
   StaffSpecialtyInput,
   WorkshopStaffCreateRequest,
   WorkshopStaffSummary,
@@ -718,22 +719,31 @@ export class WorkshopStaffPage {
     const rawValue = this.registerForm.getRawValue();
     const specialties = this.specialtyControls()
       .filter((group) => Boolean(group.get('selected')?.value))
-      .map((group): StaffSpecialtyInput => ({
-        id_especialidad: Number(group.get('id_especialidad')?.value),
-        anios_experiencia: Number(group.get('anios_experiencia')?.value ?? 0),
-        certificacion_url: this.normalizeOptionalText(
-          group.get('certificacion_url')?.value as string | null | undefined,
-        ),
-      }));
+      .map((group): StaffSpecialtyInput => {
+        const id_especialidad = Number(group.get('id_especialidad')?.value);
+        return {
+          id_especialidad: id_especialidad || 0,
+          anios_experiencia: Number(group.get('anios_experiencia')?.value ?? 0),
+          certificacion_url: this.normalizeOptionalText(
+            group.get('certificacion_url')?.value as string | null | undefined,
+          ),
+        };
+      })
+      .filter(s => s.id_especialidad > 0 && s.anios_experiencia >= 0);
+
+    if (specialties.length === 0) {
+      this.formError.set('Selecciona al menos una especialidad válida.');
+      return;
+    }
 
     const payload: WorkshopStaffCreateRequest = {
       nombre: String(rawValue.nombre ?? '').trim(),
       apellido: String(rawValue.apellido ?? '').trim(),
       ci: String(rawValue.ci ?? '').trim(),
-      telefono: this.normalizeOptionalText(rawValue.telefono),
+      telefono: this.normalizeOptionalText(String(rawValue.telefono ?? '').trim()),
       email: String(rawValue.email ?? '').trim(),
       password: String(rawValue.password ?? ''),
-      direccion: this.normalizeOptionalText(rawValue.direccion),
+      direccion: this.normalizeOptionalText(String(rawValue.direccion ?? '').trim()),
       specialties,
     };
 
@@ -779,6 +789,16 @@ export class WorkshopStaffPage {
       return;
     }
 
+    if (!Number.isInteger(item.operario_id) || item.operario_id <= 0) {
+      this.pageError.set('ID de operario inválido.');
+      return;
+    }
+
+    if (!this.isStaffAvailabilityStatus(nextStatus)) {
+      this.pageError.set('Estado de disponibilidad inválido.');
+      return;
+    }
+
     if (
       nextStatus === 'BAJA' &&
       !window.confirm(`¿Marcar a ${item.nombre_completo} como BAJA?`)
@@ -794,7 +814,7 @@ export class WorkshopStaffPage {
     this.pageError.set('');
 
     this.staffApi
-      .updateAvailability(item.operario_id, { new_status: nextStatus as any })
+      .updateAvailability(item.operario_id, { new_status: nextStatus })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updated) => {
@@ -975,5 +995,9 @@ export class WorkshopStaffPage {
     }
 
     return fallback;
+  }
+
+  private isStaffAvailabilityStatus(value: unknown): value is StaffAvailabilityStatus {
+    return value === 'DISPONIBLE' || value === 'EN_SERVICIO' || value === 'NO_DISPONIBLE' || value === 'BAJA';
   }
 }
