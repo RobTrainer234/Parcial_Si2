@@ -83,26 +83,23 @@ export const routes: Routes = [
       {
         path: 'audit',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/reputacion-auditoria/pages/audit-log.page').then(
+            (m) => m.AuditLogPage,
           ),
-        data: {
-          title: 'Auditoria y trazabilidad',
-          subtitle:
-            'Vista reservada para los registros de bitacora y seguimiento de eventos del taller.',
-        },
+      },
+      {
+        path: 'services/:serviceId/timeline',
+        loadComponent: () =>
+          import('./packages/reputacion-auditoria/pages/service-timeline.page').then(
+            (m) => m.ServiceTimelinePage,
+          ),
       },
       {
         path: 'notifications',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/gestion-auxilio/pages/notifications.page').then(
+            (m) => m.NotificationsPage,
           ),
-        data: {
-          title: 'Notificaciones',
-          subtitle:
-            'Espacio listo para bandeja administrativa y alertas operativas del taller.',
-        },
       },
     ],
   },

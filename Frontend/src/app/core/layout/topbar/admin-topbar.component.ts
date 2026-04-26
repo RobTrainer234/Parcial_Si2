@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 
 import { AuthService } from '../../auth/auth.service';
 import { NotificationApiService } from '../../notifications/notification-api.service';
@@ -9,7 +10,7 @@ import { ThemeService } from '../../theme/theme.service';
 @Component({
   selector: 'app-admin-topbar',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="topbar">
@@ -31,8 +32,8 @@ import { ThemeService } from '../../theme/theme.service';
           {{ currentTheme() === 'dark' ? 'Modo claro' : 'Modo oscuro' }}
         </button>
 
-        <button
-          type="button"
+        <a
+          routerLink="/admin/notifications"
           class="topbar__icon-button"
           aria-label="Notificaciones del taller"
         >
@@ -40,7 +41,7 @@ import { ThemeService } from '../../theme/theme.service';
           @if (unreadCount() > 0) {
             <span class="topbar__notification-count">{{ unreadCount() }}</span>
           }
-        </button>
+        </a>
 
         <div class="topbar__role">{{ currentUserRole() }}</div>
 
@@ -202,13 +203,23 @@ export class AdminTopbarComponent {
 
   constructor() {
     if (this.authService.isAuthenticated()) {
-      this.notificationApi
-        .getUnreadCount()
+      this.loadUnreadCount();
+
+      this.notificationApi.refreshUnreadCount$
         .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (response) => this.unreadCountState.set(response.unread_count),
-          error: () => this.unreadCountState.set(0),
+        .subscribe(() => {
+          this.loadUnreadCount();
         });
     }
+  }
+
+  private loadUnreadCount() {
+    this.notificationApi
+      .getUnreadCount()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.unreadCountState.set(response.unread_count),
+        error: () => this.unreadCountState.set(0),
+      });
   }
 }
