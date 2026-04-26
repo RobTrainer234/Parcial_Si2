@@ -64,3 +64,10 @@ Backend/media/
 # =========================
 !.env.example
 !**/.env.example
+
+# =========================
+# ARCHIVOS LOCALES QUE NO QUIERO SUBIR
+# =========================
+AGENTS.md
+PROJECT_MAP.md
+base_de_datos.sql
