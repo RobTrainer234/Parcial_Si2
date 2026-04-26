@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.packages.finanzas_seguros import router as finanzas_seguros_router
 from app.packages.gestion_auxilio import router as gestion_auxilio_router
@@ -13,6 +14,16 @@ from app.routers import health_router
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Proyecto SI2 Backend")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:4200",
+            "http://127.0.0.1:4200",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
     app.include_router(health_router)
     app.include_router(seguridad_usuarios_router)
     app.include_router(inteligencia_triaje_router)

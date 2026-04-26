@@ -8,7 +8,8 @@ export interface ActorContext {
 export interface UserProfile {
   user_id: number;
   persona_id: number;
-  role: string;
+  role?: string;
+  tipo_usuario?: string;
   email: string;
   phone: string | null;
   actor_context: ActorContext;

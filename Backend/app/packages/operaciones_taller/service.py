@@ -2629,6 +2629,78 @@ def deactivate_workshop_catalog_service(
     return _serialize_workshop_catalog_service(refreshed)
 
 
+def activate_workshop_catalog_service(
+    *,
+    catalog_id: int,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> WorkshopCatalogServiceResponse:
+    catalog_row = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_id,
+        workshop_id=admin_context.workshop_id,
+    )
+    if catalog_row.activo:
+        return _serialize_workshop_catalog_service(catalog_row)
+
+    _ensure_catalog_duplicate_rules(
+        db=db,
+        workshop_id=admin_context.workshop_id,
+        specialty_id=catalog_row.id_especialidad,
+        normalized_name=catalog_row.nombre,
+        exclude_catalog_id=catalog_row.id_catalogo_servicio,
+    )
+
+    previous_payload = {
+        "activo": catalog_row.activo,
+        "nombre": catalog_row.nombre,
+        "id_especialidad": catalog_row.id_especialidad,
+    }
+    catalog_row.activo = True
+    db.add(
+        _create_workshop_catalog_bitacora_event(
+            admin_context=admin_context,
+            accion="CATALOGO_SERVICIO_TALLER_ACTIVADO",
+            descripcion="El administrador activo un servicio del catalogo del taller.",
+            datos_originales=previous_payload,
+            datos_nuevos={
+                "workshop_id": admin_context.workshop_id,
+                "catalog_id": catalog_row.id_catalogo_servicio,
+                "id_especialidad": catalog_row.id_especialidad,
+                "nombre": catalog_row.nombre,
+                "precio_base_min": str(catalog_row.precio_base_min),
+                "precio_base_max": str(catalog_row.precio_base_max),
+                "incluye_repuestos_basicos": catalog_row.incluye_repuestos_basicos,
+                "activo": catalog_row.activo,
+            },
+            ip_origen=ip_origen,
+            user_agent=user_agent,
+        )
+    )
+
+    try:
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Catalog service could not be activated.",
+        ) from exc
+
+    db.expire_all()
+    refreshed = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_row.id_catalogo_servicio,
+        workshop_id=admin_context.workshop_id,
+    )
+    return _serialize_workshop_catalog_service(refreshed)
+
+
 def list_workshop_media_files(
     *,
     admin_context: WorkshopAdminContext,

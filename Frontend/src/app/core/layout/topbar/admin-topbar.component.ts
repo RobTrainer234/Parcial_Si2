@@ -1,7 +1,9 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, output, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { AuthService } from '../../auth/auth.service';
+import { NotificationApiService } from '../../notifications/notification-api.service';
 import { ThemeService } from '../../theme/theme.service';
 
 @Component({
@@ -35,7 +37,12 @@ import { ThemeService } from '../../theme/theme.service';
           aria-label="Notificaciones del taller"
         >
           <span aria-hidden="true">●</span>
+          @if (unreadCount() > 0) {
+            <span class="topbar__notification-count">{{ unreadCount() }}</span>
+          }
         </button>
+
+        <div class="topbar__role">{{ currentUserRole() }}</div>
 
         <div class="topbar__user-pill" [attr.aria-label]="'Usuario ' + currentUserEmail()">
           {{ userInitials() }}
@@ -106,13 +113,43 @@ import { ThemeService } from '../../theme/theme.service';
       }
 
       .topbar__icon-button {
+        position: relative;
         color: var(--color-primary);
         cursor: pointer;
+      }
+
+      .topbar__notification-count {
+        position: absolute;
+        top: -0.15rem;
+        right: -0.1rem;
+        min-width: 1.2rem;
+        height: 1.2rem;
+        padding: 0 0.25rem;
+        border-radius: 999px;
+        background: var(--color-danger);
+        color: #fff;
+        font-size: 0.72rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .topbar__user-pill {
         color: var(--color-text);
         font-weight: 700;
+      }
+
+      .topbar__role {
+        padding: 0.55rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+        color: var(--color-text-muted);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
       }
 
       @media (max-width: 920px) {
@@ -132,6 +169,9 @@ import { ThemeService } from '../../theme/theme.service';
 export class AdminTopbarComponent {
   private readonly authService = inject(AuthService);
   private readonly themeService = inject(ThemeService);
+  private readonly notificationApi = inject(NotificationApiService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly unreadCountState = signal(0);
 
   readonly logout = output<void>();
 
@@ -143,6 +183,10 @@ export class AdminTopbarComponent {
   protected readonly currentUserEmail = computed(
     () => this.currentUser()?.email ?? 'admin@si2.local',
   );
+  protected readonly currentUserRole = computed(
+    () => this.currentUser()?.role ?? this.currentUser()?.tipo_usuario ?? 'SIN ROL',
+  );
+  protected readonly unreadCount = computed(() => this.unreadCountState());
   protected readonly userInitials = computed(() => {
     const userEmail = this.currentUser()?.email ?? 'AD';
     const base = userEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
@@ -154,5 +198,17 @@ export class AdminTopbarComponent {
 
   protected toggleTheme(): void {
     this.themeService.toggleTheme();
+  }
+
+  constructor() {
+    if (this.authService.isAuthenticated()) {
+      this.notificationApi
+        .getUnreadCount()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response) => this.unreadCountState.set(response.unread_count),
+          error: () => this.unreadCountState.set(0),
+        });
+    }
   }
 }

@@ -41,57 +41,44 @@ export const routes: Routes = [
       {
         path: 'workshop/profile',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/operaciones-taller/pages/workshop-profile.page').then(
+            (m) => m.WorkshopProfilePage,
           ),
-        data: {
-          title: 'Perfil del taller',
-          subtitle: 'Espacio preparado para la configuración operativa y comercial del taller.',
-        },
       },
       {
         path: 'workshop/catalog',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/operaciones-taller/pages/workshop-catalog.page').then(
+            (m) => m.WorkshopCatalogPage,
           ),
-        data: {
-          title: 'Catálogo de servicios',
-          subtitle: 'Aquí se mostrará la administración de servicios base y precios referenciales.',
-        },
       },
       {
         path: 'workshop/staff',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/operaciones-taller/pages/workshop-staff.page').then(
+            (m) => m.WorkshopStaffPage,
           ),
-        data: {
-          title: 'Operarios del taller',
-          subtitle: 'Vista reservada para gestión de disponibilidad, perfiles y capacidad operativa.',
-        },
       },
       {
         path: 'requests',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/operaciones-taller/pages/pending-requests.page').then(
+            (m) => m.PendingRequestsPage,
           ),
-        data: {
-          title: 'Solicitudes de auxilio',
-          subtitle: 'La navegación queda lista para seguimiento y decisión de solicitudes.',
-        },
+      },
+      {
+        path: 'requests/:requestId',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/request-detail.page').then(
+            (m) => m.RequestDetailPage,
+          ),
       },
       {
         path: 'services/waiting-assignment',
         loadComponent: () =>
-          import('./core/layout/admin-placeholder-page.component').then(
-            (m) => m.AdminPlaceholderPageComponent,
+          import('./packages/operaciones-taller/pages/waiting-assignment.page').then(
+            (m) => m.WaitingAssignmentPage,
           ),
-        data: {
-          title: 'Asignaciones pendientes',
-          subtitle: 'Módulo preparado para coordinar operarios y servicios aceptados.',
-        },
       },
       {
         path: 'audit',
@@ -100,8 +87,9 @@ export const routes: Routes = [
             (m) => m.AdminPlaceholderPageComponent,
           ),
         data: {
-          title: 'Auditoría y trazabilidad',
-          subtitle: 'Vista reservada para los registros de bitácora y seguimiento de eventos del taller.',
+          title: 'Auditoria y trazabilidad',
+          subtitle:
+            'Vista reservada para los registros de bitacora y seguimiento de eventos del taller.',
         },
       },
       {
@@ -112,7 +100,8 @@ export const routes: Routes = [
           ),
         data: {
           title: 'Notificaciones',
-          subtitle: 'Espacio listo para bandeja administrativa y alertas operativas del taller.',
+          subtitle:
+            'Espacio listo para bandeja administrativa y alertas operativas del taller.',
         },
       },
     ],

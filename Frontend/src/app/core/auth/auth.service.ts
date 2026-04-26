@@ -4,46 +4,55 @@ import { firstValueFrom } from 'rxjs';
 
 import { buildApiUrl } from '../config/api.config';
 import { LoginRequest, LoginResponse, StoredSession, UserProfile } from './auth.models';
-
-const SESSION_STORAGE_KEY = 'si2.admin.session';
+import { TokenStorageService } from './token-storage.service';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
+  private readonly tokenStorage = inject(TokenStorageService);
 
-  private readonly sessionSignal = signal<StoredSession | null>(this.restoreSession());
+  private readonly sessionSignal = signal<StoredSession | null>(this.tokenStorage.restoreSession());
   private readonly loadingProfileSignal = signal(false);
 
   readonly session = computed(() => this.sessionSignal());
   readonly currentUser = computed(() => this.sessionSignal()?.user ?? null);
-  readonly isAuthenticated = computed(() => !!this.sessionSignal()?.access_token);
-  readonly isAdmin = computed(() => this.currentUser()?.role === 'ADMINISTRADOR');
 
-  getToken(): string | null {
-    return this.sessionSignal()?.access_token ?? null;
-  }
-
-  async loginAsAdmin(payload: LoginRequest): Promise<UserProfile> {
+  async login(payload: LoginRequest): Promise<UserProfile> {
     const response = await firstValueFrom(
       this.http.post<LoginResponse>(buildApiUrl('/auth/login'), payload),
     );
 
-    if (response.role !== 'ADMINISTRADOR' || response.user.role !== 'ADMINISTRADOR') {
+    const resolvedRole = this.resolveRole(response.user, response.role);
+    if (resolvedRole !== 'ADMINISTRADOR') {
       this.clearSession();
       throw new Error('Solo los usuarios administradores pueden ingresar al panel de taller.');
     }
 
+    const normalizedUser: UserProfile = {
+      ...response.user,
+      role: resolvedRole,
+      tipo_usuario: response.user.tipo_usuario ?? resolvedRole,
+    };
+
     const session: StoredSession = {
       access_token: response.access_token,
       token_type: response.token_type,
-      user: response.user,
+      user: normalizedUser,
     };
 
     this.setSession(session);
-    return response.user;
+    return normalizedUser;
   }
 
-  async ensureUserLoaded(): Promise<UserProfile | null> {
+  async loginAsAdmin(payload: LoginRequest): Promise<UserProfile> {
+    return this.login(payload);
+  }
+
+  async getMe(): Promise<UserProfile | null> {
+    return this.refreshCurrentUser();
+  }
+
+  async refreshCurrentUser(): Promise<UserProfile | null> {
     const currentSession = this.sessionSignal();
     if (!currentSession?.access_token) {
       return null;
@@ -58,13 +67,19 @@ export class AuthService {
       const profile = await firstValueFrom(
         this.http.get<UserProfile>(buildApiUrl('/auth/me')),
       );
+      const resolvedRole = this.resolveRole(profile, profile.role);
+      const normalizedUser: UserProfile = {
+        ...profile,
+        role: resolvedRole,
+        tipo_usuario: profile.tipo_usuario ?? resolvedRole,
+      };
 
       this.setSession({
         ...currentSession,
-        user: profile,
+        user: normalizedUser,
       });
 
-      return profile;
+      return normalizedUser;
     } catch {
       this.clearSession();
       return null;
@@ -73,31 +88,46 @@ export class AuthService {
     }
   }
 
+  async ensureUserLoaded(): Promise<UserProfile | null> {
+    const currentUser = this.currentUser();
+    if (currentUser) {
+      return currentUser;
+    }
+    return this.refreshCurrentUser();
+  }
+
+  getToken(): string | null {
+    return this.sessionSignal()?.access_token ?? this.tokenStorage.getToken();
+  }
+
+  isAuthenticated(): boolean {
+    return !!this.getToken();
+  }
+
+  getCurrentUser(): UserProfile | null {
+    return this.currentUser();
+  }
+
+  isAdmin(): boolean {
+    return this.resolveRole(this.currentUser(), this.currentUser()?.role) === 'ADMINISTRADOR';
+  }
+
   logout(): void {
     this.clearSession();
   }
 
   private setSession(session: StoredSession): void {
     this.sessionSignal.set(session);
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    this.tokenStorage.saveToken(session.access_token);
+    this.tokenStorage.saveCurrentUser(session.user);
   }
 
   private clearSession(): void {
     this.sessionSignal.set(null);
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    this.tokenStorage.clearAll();
   }
 
-  private restoreSession(): StoredSession | null {
-    const rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!rawSession) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(rawSession) as StoredSession;
-    } catch {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-      return null;
-    }
+  private resolveRole(user: UserProfile | null | undefined, fallbackRole?: string): string {
+    return user?.role ?? user?.tipo_usuario ?? fallbackRole ?? '';
   }
 }

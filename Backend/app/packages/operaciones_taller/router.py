@@ -38,6 +38,7 @@ from .schemas import (
     WorkshopStaffSummary,
 )
 from .service import (
+    activate_workshop_catalog_service,
     assign_operario_to_service,
     create_workshop_catalog_service,
     decide_workshop_request,
@@ -159,6 +160,22 @@ def workshop_catalog_deactivate(
     db: Session = Depends(get_db),
 ) -> WorkshopCatalogServiceResponse:
     return deactivate_workshop_catalog_service(
+        catalog_id=catalog_id,
+        admin_context=admin_context,
+        db=db,
+        ip_origen=request.client.host if request.client is not None else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.patch("/catalog/{catalog_id}/activate", response_model=WorkshopCatalogServiceResponse)
+def workshop_catalog_activate(
+    request: Request,
+    catalog_id: int,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> WorkshopCatalogServiceResponse:
+    return activate_workshop_catalog_service(
         catalog_id=catalog_id,
         admin_context=admin_context,
         db=db,

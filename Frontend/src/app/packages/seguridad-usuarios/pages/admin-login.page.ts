@@ -98,9 +98,11 @@ import { ThemeService } from '../../../core/theme/theme.service';
         position: absolute;
         top: var(--space-6);
         right: var(--space-6);
+        z-index: 1;
       }
 
       .login-card {
+        position: relative;
         width: min(980px, 100%);
         display: grid;
         grid-template-columns: 1.1fr 0.9fr;
@@ -111,7 +113,25 @@ import { ThemeService } from '../../../core/theme/theme.service';
         background:
           radial-gradient(circle at top right, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 35%),
           linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 94%, transparent), var(--color-surface));
-        box-shadow: var(--shadow-card);
+        box-shadow:
+          var(--shadow-card),
+          0 0 0 1px color-mix(in srgb, var(--color-primary) 8%, transparent);
+      }
+
+      .login-card::after {
+        content: '';
+        position: absolute;
+        top: var(--space-6);
+        bottom: var(--space-6);
+        left: calc(55% - 1px);
+        width: 1px;
+        background: linear-gradient(
+          180deg,
+          transparent,
+          color-mix(in srgb, var(--color-border-strong) 72%, transparent),
+          transparent
+        );
+        pointer-events: none;
       }
 
       .login-card__brand {
@@ -123,6 +143,7 @@ import { ThemeService } from '../../../core/theme/theme.service';
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-soft)), var(--color-surface-soft));
         border: 1px solid var(--color-border);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
       }
 
       .login-card__eyebrow {
@@ -180,6 +201,7 @@ import { ThemeService } from '../../../core/theme/theme.service';
         justify-content: center;
         gap: var(--space-5);
         padding: var(--space-4) var(--space-2);
+        position: relative;
       }
 
       .login-card__error {
@@ -193,11 +215,16 @@ import { ThemeService } from '../../../core/theme/theme.service';
 
       .login-card__submit {
         width: 100%;
+        margin-top: var(--space-2);
       }
 
       @media (max-width: 900px) {
         .login-card {
           grid-template-columns: 1fr;
+        }
+
+        .login-card::after {
+          display: none;
         }
 
         .login-card__highlights {
