@@ -17,6 +17,7 @@ from app.models import (
     Evidencia,
     Incidente,
     Notificacion,
+    Operario,
     Seguro,
     Servicio,
     ServicioUbicacion,
@@ -2613,11 +2614,20 @@ def decide_service_finalization(
     admin_users = _get_workshop_admin_users(db, workshop_id=service.solicitud.id_taller)
 
     if payload.decision == "CONFIRMAR":
+        operario = service.operario
+        if operario is None and service.id_persona_operario is not None:
+            operario = db.scalar(
+                select(Operario).where(Operario.id_persona == service.id_persona_operario)
+            )
+        operario_previous_status = operario.estado_disponibilidad if operario is not None else None
+
         service.estado = FINALIZATION_CONFIRMED_STATE
         service.confirmacion_cliente = True
         service.fecha_confirmacion_cliente = changed_at
         service.fecha_fin = changed_at
         incident.estado = "FINALIZADO"
+        if operario is not None:
+            operario.estado_disponibilidad = "DISPONIBLE"
         duration_seconds = _compute_service_duration_seconds(service)
 
         db.add(
@@ -2633,6 +2643,8 @@ def decide_service_finalization(
                     "changed_at": changed_at.isoformat(),
                     "duration_seconds": duration_seconds,
                     "final_evidence_count": final_evidence_count,
+                    "operario_previous_status": operario_previous_status,
+                    "operario_new_status": operario.estado_disponibilidad if operario is not None else None,
                 },
                 ip_origen=ip_origen,
                 user_agent=user_agent,
