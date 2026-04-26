@@ -401,3 +401,155 @@ class WorkshopMediaUploadRequest(_NormalizedModel):
         if normalized not in {"IMAGEN_TALLER", "CERTIFICADO_TECNICO"}:
             raise ValueError("tipo_archivo must be IMAGEN_TALLER or CERTIFICADO_TECNICO.")
         return normalized
+
+
+class WorkshopDashboardPeriodResponse(BaseModel):
+    date_from: datetime
+    date_to: datetime
+
+
+class DashboardCountItem(BaseModel):
+    label: str
+    count: int
+
+
+class DashboardStuckServiceItem(BaseModel):
+    service_id: int
+    incident_id: int
+    current_state: str
+    minutes_in_current_state: Decimal | None = None
+    client_reported_description: str
+    detected_specialty: str | None = None
+    severity: str | None = None
+    assigned_operario_name: str | None = None
+    reason: str
+
+
+class WorkshopDashboardKpiResponse(BaseModel):
+    pending_requests: int
+    accepted_requests: int
+    rejected_requests: int
+    expired_requests: int
+    active_services: int
+    completed_services: int
+    paid_services: int
+    pending_payments: int
+    total_revenue: Decimal
+    average_rating: Decimal | None = None
+    first_contact_resolution_rate: Decimal | None = None
+    average_acceptance_time_minutes: Decimal | None = None
+    average_completion_time_minutes: Decimal | None = None
+
+
+class WorkshopDashboardOperationsResponse(BaseModel):
+    services_by_state: list[DashboardCountItem]
+    requests_by_status: list[DashboardCountItem]
+    incidents_by_severity: list[DashboardCountItem]
+    incidents_by_detected_specialty: list[DashboardCountItem]
+    incident_heatmap_points: list["IncidentHeatmapPoint"]
+    stuck_services: list[DashboardStuckServiceItem]
+
+
+class PrequotationDeviationItem(BaseModel):
+    service_id: int
+    incident_id: int
+    prequotation_code: str
+    prequotation_min: Decimal
+    prequotation_max: Decimal
+    final_cost: Decimal
+    deviation_amount: Decimal
+    deviation_percentage: Decimal
+    status: str
+    risk_level: str
+
+
+class WorkshopDashboardFinancialResponse(BaseModel):
+    total_revenue: Decimal
+    confirmed_payments: int
+    pending_payments: int
+    rejected_payments: int
+    average_ticket: Decimal | None = None
+    monthly_revenue: list["MonthlyRevenueItem"]
+    projected_revenue: Decimal | None = None
+    prequotation_vs_final: list[PrequotationDeviationItem]
+
+
+class OperarioDashboardItem(BaseModel):
+    operario_id: int
+    nombre_completo: str
+    estado_disponibilidad: str
+    assigned_services: int
+    completed_services: int
+    average_rating: Decimal | None = None
+    average_completion_time_minutes: Decimal | None = None
+    active_service_id: int | None = None
+    risk_flag: str | None = None
+
+
+class WorkshopDashboardOperarioResponse(BaseModel):
+    operarios: list[OperarioDashboardItem]
+    operario_ranking: list["OperarioRankingItem"]
+
+
+class LowRatingServiceItem(BaseModel):
+    service_id: int
+    incident_id: int
+    rating_id: int
+    stars: int
+    comment: str | None = None
+    rated_at: datetime
+    rated_target_type: str
+
+
+class WorkshopDashboardReputationResponse(BaseModel):
+    workshop_average_rating: Decimal | None = None
+    total_ratings: int
+    rating_distribution: list[DashboardCountItem]
+    low_rating_services: list[LowRatingServiceItem]
+
+
+class WorkshopDashboardActionItem(BaseModel):
+    priority: str
+    type: str
+    title: str
+    description: str
+    related_service_id: int | None = None
+    related_incident_id: int | None = None
+    recommended_action: str
+
+
+class MonthlyRevenueItem(BaseModel):
+    month: str
+    revenue: Decimal
+
+
+class IncidentHeatmapPoint(BaseModel):
+    latitud: Decimal
+    longitud: Decimal
+    severidad: str | None = None
+    especialidad: str | None = None
+    cantidad: int
+
+
+class OperarioRankingItem(BaseModel):
+    operario_id: int
+    nombre_completo: str
+    efficiency_score: Decimal
+    completed_services: int
+    average_rating: Decimal | None = None
+    average_completion_time_minutes: Decimal | None = None
+
+
+class WorkshopDashboardOverviewResponse(BaseModel):
+    period: WorkshopDashboardPeriodResponse
+    kpis: WorkshopDashboardKpiResponse
+    operations: WorkshopDashboardOperationsResponse
+    financial: WorkshopDashboardFinancialResponse
+    operarios: WorkshopDashboardOperarioResponse
+    reputation: WorkshopDashboardReputationResponse
+    action_items: list[WorkshopDashboardActionItem]
+
+
+WorkshopDashboardOperationsResponse.model_rebuild()
+WorkshopDashboardFinancialResponse.model_rebuild()
+WorkshopDashboardOperarioResponse.model_rebuild()

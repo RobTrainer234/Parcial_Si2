@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import csv
+from datetime import datetime
 from decimal import Decimal
+from io import StringIO
 from typing import Literal
 
-from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from fastapi import HTTPException, Response, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
@@ -15,13 +18,22 @@ from app.models import (
     Incidente,
     Notificacion,
     Operario,
+    Pago,
     Servicio,
     SolicitudServicio,
     Taller,
     Usuario,
 )
+from app.packages.operaciones_taller.dependencies import WorkshopAdminContext
 
 from .schemas import (
+    AuditActorSummary,
+    AuditLinkedEntitiesResponse,
+    AuditLogDetailResponse,
+    AuditLogFilterOptionsResponse,
+    AuditLogItemResponse,
+    AuditLogPageResponse,
+    AuditTimelineItemResponse,
     AllowedRatingTargetResponse,
     ExistingRatingResponse,
     RatingReminderResponse,
@@ -32,6 +44,18 @@ from .schemas import (
 
 
 PAID_SERVICE_STATE = "PAGADO"
+AUDIT_CONFIGURATION_EVENT_TYPES = {"CONFIGURACION_TALLER", "GESTION_PERSONAL"}
+AUDIT_TIMELINE_EVENT_TYPES = {
+    "TRIAJE",
+    "MATCHMAKING",
+    "OPERACION_TALLER",
+    "OPERACION_CAMPO",
+    "IA",
+    "PAGO",
+    "NOTIFICACION",
+    "REPUTACION",
+    "CONFIGURACION_TALLER",
+}
 
 
 def _build_service_query():
@@ -40,6 +64,243 @@ def _build_service_query():
         joinedload(Servicio.solicitud).joinedload(SolicitudServicio.taller),
         joinedload(Servicio.solicitud).joinedload(SolicitudServicio.incidente),
         joinedload(Servicio.calificaciones),
+    )
+
+
+def _build_audit_query():
+    return select(Bitacora).options(
+        joinedload(Bitacora.usuario).joinedload(Usuario.persona),
+    )
+
+
+def _get_workshop_owned_service(
+    db: Session,
+    *,
+    service_id: int,
+    workshop_id: int,
+) -> Servicio:
+    service = db.scalar(
+        _build_service_query()
+        .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+        .where(
+            Servicio.id_servicio == service_id,
+            SolicitudServicio.id_taller == workshop_id,
+        )
+    )
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop service not found.",
+        )
+    return service
+
+
+def _build_workshop_visible_audit_query(
+    *,
+    admin_context: WorkshopAdminContext,
+):
+    workshop_id = admin_context.workshop_id
+    visible_service_ids = (
+        select(Servicio.id_servicio)
+        .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+        .where(SolicitudServicio.id_taller == workshop_id)
+    )
+    visible_request_ids = select(SolicitudServicio.id_solicitud).where(
+        SolicitudServicio.id_taller == workshop_id
+    )
+    visible_incident_ids = select(SolicitudServicio.id_incidente).where(
+        SolicitudServicio.id_taller == workshop_id
+    )
+    visible_payment_ids = (
+        select(Pago.id_pago)
+        .join(Servicio, Servicio.id_servicio == Pago.id_servicio)
+        .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+        .where(SolicitudServicio.id_taller == workshop_id)
+    )
+    visible_admin_user_ids = (
+        select(Usuario.id_usuario)
+        .join(Administrador, Administrador.id_persona == Usuario.id_persona)
+        .where(
+            Administrador.id_taller == workshop_id,
+            Administrador.activo.is_(True),
+            Usuario.activo.is_(True),
+        )
+    )
+    visibility_clause = or_(
+        Bitacora.id_servicio.in_(visible_service_ids),
+        Bitacora.id_solicitud.in_(visible_request_ids),
+        Bitacora.id_pago.in_(visible_payment_ids),
+        and_(
+            Bitacora.id_incidente.in_(visible_incident_ids),
+            Bitacora.id_solicitud.is_(None),
+            Bitacora.id_servicio.is_(None),
+            Bitacora.id_pago.is_(None),
+        ),
+        and_(
+            Bitacora.id_usuario.in_(visible_admin_user_ids),
+            Bitacora.tipo_evento.in_(tuple(AUDIT_CONFIGURATION_EVENT_TYPES)),
+        ),
+    )
+    return _build_audit_query().where(visibility_clause)
+
+
+def _validate_audit_filters(
+    *,
+    limit: int,
+    offset: int,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="limit must be between 1 and 100.",
+        )
+    if offset < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="offset must be greater than or equal to 0.",
+        )
+    if date_from is not None and date_to is not None and date_to < date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="date_to must be greater than or equal to date_from.",
+        )
+
+
+def _apply_audit_filters(
+    query,
+    *,
+    service_id: int | None = None,
+    incident_id: int | None = None,
+    request_id: int | None = None,
+    payment_id: int | None = None,
+    actor_user_id: int | None = None,
+    event_type: str | None = None,
+    action: str | None = None,
+    main_entity: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+):
+    if service_id is not None:
+        query = query.where(Bitacora.id_servicio == service_id)
+    if incident_id is not None:
+        query = query.where(Bitacora.id_incidente == incident_id)
+    if request_id is not None:
+        query = query.where(Bitacora.id_solicitud == request_id)
+    if payment_id is not None:
+        query = query.where(Bitacora.id_pago == payment_id)
+    if actor_user_id is not None:
+        query = query.where(Bitacora.id_usuario == actor_user_id)
+    if event_type is not None:
+        query = query.where(Bitacora.tipo_evento == event_type.strip())
+    if action is not None:
+        query = query.where(Bitacora.accion == action.strip())
+    if main_entity is not None:
+        query = query.where(Bitacora.entidad_principal == main_entity.strip())
+    if date_from is not None:
+        query = query.where(Bitacora.fecha_hora >= date_from)
+    if date_to is not None:
+        query = query.where(Bitacora.fecha_hora <= date_to)
+    normalized_search = " ".join(search.split()) if search is not None else None
+    if normalized_search:
+        pattern = f"%{normalized_search}%"
+        query = query.where(
+            or_(
+                Bitacora.accion.ilike(pattern),
+                Bitacora.tipo_evento.ilike(pattern),
+                Bitacora.descripcion.ilike(pattern),
+                Bitacora.entidad_principal.ilike(pattern),
+                Bitacora.hash_evento.ilike(pattern),
+            )
+        )
+    return query
+
+
+def _serialize_audit_actor(user: Usuario | None) -> AuditActorSummary | None:
+    if user is None:
+        return None
+    return AuditActorSummary(
+        user_id=user.id_usuario,
+        persona_id=user.id_persona,
+        email=user.email,
+        tipo_usuario=user.tipo_usuario,
+    )
+
+
+def _serialize_audit_linked(event: Bitacora) -> AuditLinkedEntitiesResponse:
+    return AuditLinkedEntitiesResponse(
+        incident_id=event.id_incidente,
+        request_id=event.id_solicitud,
+        service_id=event.id_servicio,
+        payment_id=event.id_pago,
+    )
+
+
+def _serialize_audit_item(event: Bitacora) -> AuditLogItemResponse:
+    return AuditLogItemResponse(
+        audit_id=event.id_bitacora,
+        timestamp=event.fecha_hora,
+        action=event.accion,
+        event_type=event.tipo_evento,
+        description=event.descripcion,
+        main_entity=event.entidad_principal,
+        main_entity_id=event.id_entidad_principal,
+        actor=_serialize_audit_actor(event.usuario),
+        linked=_serialize_audit_linked(event),
+        hash_evento=event.hash_evento,
+        has_original_data=event.datos_originales is not None,
+        has_new_data=event.datos_nuevos is not None,
+    )
+
+
+def _serialize_audit_detail(event: Bitacora) -> AuditLogDetailResponse:
+    item = _serialize_audit_item(event)
+    return AuditLogDetailResponse(
+        **item.model_dump(),
+        datos_originales=event.datos_originales,
+        datos_nuevos=event.datos_nuevos,
+        ip_origen=event.ip_origen,
+        user_agent=event.user_agent,
+    )
+
+
+def _extract_state_from_payload(payload: object, *keys: str) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _serialize_timeline_item(event: Bitacora) -> AuditTimelineItemResponse:
+    return AuditTimelineItemResponse(
+        audit_id=event.id_bitacora,
+        timestamp=event.fecha_hora,
+        action=event.accion,
+        event_type=event.tipo_evento,
+        description=event.descripcion,
+        service_state=(
+            _extract_state_from_payload(
+                event.datos_nuevos,
+                "new_state",
+                "service_state",
+                "service_new_state",
+            )
+            or _extract_state_from_payload(event.datos_originales, "service_state")
+        ),
+        incident_state=(
+            _extract_state_from_payload(
+                event.datos_nuevos,
+                "incident_new_state",
+                "incident_state",
+                "new_incident_state",
+            )
+            or _extract_state_from_payload(event.datos_originales, "incident_state")
+        ),
     )
 
 
@@ -263,6 +524,234 @@ def _has_equivalent_pending_reminder(
         if item.payload == payload:
             return True
     return False
+
+
+def list_workshop_audit_logs(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    service_id: int | None = None,
+    incident_id: int | None = None,
+    request_id: int | None = None,
+    payment_id: int | None = None,
+    actor_user_id: int | None = None,
+    event_type: str | None = None,
+    action: str | None = None,
+    main_entity: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> AuditLogPageResponse:
+    _validate_audit_filters(limit=limit, offset=offset, date_from=date_from, date_to=date_to)
+    filtered_query = _apply_audit_filters(
+        _build_workshop_visible_audit_query(admin_context=admin_context),
+        service_id=service_id,
+        incident_id=incident_id,
+        request_id=request_id,
+        payment_id=payment_id,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        action=action,
+        main_entity=main_entity,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+    total = db.scalar(
+        select(func.count()).select_from(filtered_query.order_by(None).subquery())
+    ) or 0
+    items = list(
+        db.scalars(
+            filtered_query
+            .order_by(Bitacora.fecha_hora.desc(), Bitacora.id_bitacora.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    )
+    return AuditLogPageResponse(
+        items=[_serialize_audit_item(item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_next=offset + len(items) < total,
+    )
+
+
+def get_workshop_audit_log_detail(
+    *,
+    audit_id: int,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+) -> AuditLogDetailResponse:
+    event = db.scalar(
+        _build_workshop_visible_audit_query(admin_context=admin_context).where(
+            Bitacora.id_bitacora == audit_id
+        )
+    )
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audit log event not found.",
+        )
+    return _serialize_audit_detail(event)
+
+
+def get_workshop_service_timeline(
+    *,
+    service_id: int,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+) -> list[AuditTimelineItemResponse]:
+    service = _get_workshop_owned_service(
+        db,
+        service_id=service_id,
+        workshop_id=admin_context.workshop_id,
+    )
+    payment_id = service.pago.id_pago if service.pago is not None else None
+    link_conditions = [
+        Bitacora.id_servicio == service.id_servicio,
+        Bitacora.id_solicitud == service.id_solicitud,
+        Bitacora.id_incidente == service.solicitud.incidente.id_incidente,
+    ]
+    if payment_id is not None:
+        link_conditions.append(Bitacora.id_pago == payment_id)
+    timeline_query = _build_workshop_visible_audit_query(admin_context=admin_context).where(
+        Bitacora.tipo_evento.in_(tuple(AUDIT_TIMELINE_EVENT_TYPES)),
+        or_(*link_conditions),
+    )
+    events = list(
+        db.scalars(
+            timeline_query.order_by(Bitacora.fecha_hora.asc(), Bitacora.id_bitacora.asc())
+        )
+    )
+    return [_serialize_timeline_item(event) for event in events]
+
+
+def get_workshop_audit_filter_options(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+) -> AuditLogFilterOptionsResponse:
+    visible_subquery = _build_workshop_visible_audit_query(
+        admin_context=admin_context
+    ).order_by(None).subquery()
+    event_types = [
+        value
+        for value in db.scalars(
+            select(visible_subquery.c.tipo_evento)
+            .distinct()
+            .order_by(visible_subquery.c.tipo_evento.asc())
+        )
+        if value is not None
+    ]
+    actions = [
+        value
+        for value in db.scalars(
+            select(visible_subquery.c.accion)
+            .distinct()
+            .order_by(visible_subquery.c.accion.asc())
+        )
+        if value is not None
+    ]
+    main_entities = [
+        value
+        for value in db.scalars(
+            select(visible_subquery.c.entidad_principal)
+            .distinct()
+            .order_by(visible_subquery.c.entidad_principal.asc())
+        )
+        if value is not None
+    ]
+    return AuditLogFilterOptionsResponse(
+        event_types=event_types,
+        actions=actions,
+        main_entities=main_entities,
+    )
+
+
+def export_workshop_audit_logs_csv(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    service_id: int | None = None,
+    incident_id: int | None = None,
+    request_id: int | None = None,
+    payment_id: int | None = None,
+    actor_user_id: int | None = None,
+    event_type: str | None = None,
+    action: str | None = None,
+    main_entity: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+) -> Response:
+    _validate_audit_filters(limit=50, offset=0, date_from=date_from, date_to=date_to)
+    filtered_query = _apply_audit_filters(
+        _build_workshop_visible_audit_query(admin_context=admin_context),
+        service_id=service_id,
+        incident_id=incident_id,
+        request_id=request_id,
+        payment_id=payment_id,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        action=action,
+        main_entity=main_entity,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+    events = list(
+        db.scalars(
+            filtered_query.order_by(Bitacora.fecha_hora.desc(), Bitacora.id_bitacora.desc())
+        )
+    )
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "audit_id",
+            "timestamp",
+            "action",
+            "event_type",
+            "description",
+            "main_entity",
+            "main_entity_id",
+            "user_id",
+            "incident_id",
+            "request_id",
+            "service_id",
+            "payment_id",
+            "hash_evento",
+            "ip_origen",
+        ]
+    )
+    for event in events:
+        writer.writerow(
+            [
+                event.id_bitacora,
+                event.fecha_hora.isoformat(),
+                event.accion,
+                event.tipo_evento,
+                event.descripcion,
+                event.entidad_principal,
+                event.id_entidad_principal,
+                event.id_usuario,
+                event.id_incidente,
+                event.id_solicitud,
+                event.id_servicio,
+                event.id_pago,
+                event.hash_evento,
+                event.ip_origen,
+            ]
+        )
+    filename = f"audit_logs_workshop_{admin_context.workshop_id}.csv"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def get_rating_status(

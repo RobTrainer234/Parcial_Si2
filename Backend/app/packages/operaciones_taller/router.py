@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import ValidationError
@@ -23,6 +24,7 @@ from .schemas import (
     WorkshopCatalogServiceCreateRequest,
     WorkshopCatalogServiceResponse,
     WorkshopCatalogServiceUpdateRequest,
+    WorkshopDashboardOverviewResponse,
     WorkshopRequestDecisionRequest,
     WorkshopRequestDecisionResponse,
     WorkshopRequestDetailResponse,
@@ -40,6 +42,7 @@ from .service import (
     create_workshop_catalog_service,
     decide_workshop_request,
     deactivate_workshop_catalog_service,
+    get_workshop_dashboard_overview,
     get_operario_candidates_for_service,
     get_repair_report_snapshot,
     get_workshop_profile,
@@ -60,6 +63,21 @@ from .service import (
 
 
 router = APIRouter(prefix="/workshop", tags=["workshop-requests"])
+
+
+@router.get("/dashboard/overview", response_model=WorkshopDashboardOverviewResponse)
+def workshop_dashboard_overview(
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> WorkshopDashboardOverviewResponse:
+    return get_workshop_dashboard_overview(
+        admin_context=admin_context,
+        db=db,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.get("/profile", response_model=WorkshopProfileResponse)

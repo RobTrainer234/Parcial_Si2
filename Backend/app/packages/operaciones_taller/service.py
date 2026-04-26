@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.models import (
     Administrador,
     Bitacora,
+    Calificacion,
     CatalogoServicioTaller,
     Evidencia,
     Especialidad,
@@ -19,6 +21,7 @@ from app.models import (
     Notificacion,
     Operario,
     OperarioEspecialidad,
+    Pago,
     Persona,
     Servicio,
     ServicioInforme,
@@ -60,7 +63,23 @@ from .schemas import (
     WorkshopCatalogServiceCreateRequest,
     WorkshopCatalogServiceResponse,
     WorkshopCatalogServiceUpdateRequest,
+    DashboardCountItem,
+    IncidentHeatmapPoint,
+    DashboardStuckServiceItem,
+    LowRatingServiceItem,
+    MonthlyRevenueItem,
+    OperarioDashboardItem,
+    OperarioRankingItem,
+    PrequotationDeviationItem,
     WorkshopConfiguredSpecialtyResponse,
+    WorkshopDashboardActionItem,
+    WorkshopDashboardFinancialResponse,
+    WorkshopDashboardKpiResponse,
+    WorkshopDashboardOperarioResponse,
+    WorkshopDashboardOperationsResponse,
+    WorkshopDashboardOverviewResponse,
+    WorkshopDashboardPeriodResponse,
+    WorkshopDashboardReputationResponse,
     WorkshopMediaFileResponse,
     WorkshopMediaUploadRequest,
     WorkshopProfileResponse,
@@ -97,6 +116,33 @@ PREQUOTATION_HISTORICAL_SERVICE_STATES = {
     "FINALIZADO_PENDIENTE_PAGO",
     "PAGADO",
 }
+DASHBOARD_DEFAULT_DAYS = 30
+DASHBOARD_CURRENCY = "BOB"
+DASHBOARD_ACTIVE_SERVICE_STATES = {
+    "EN_ESPERA_ASIGNACION",
+    "ASIGNADO",
+    "EN_CAMINO",
+    "EN_SITIO",
+    "EN_DIAGNOSTICO_FISICO",
+    "EN_REPARACION",
+    "ESPERANDO_REPUESTOS",
+    "COMPLETADO_PENDIENTE_CONFIRMACION",
+    "FINALIZADO_PENDIENTE_PAGO",
+}
+DASHBOARD_COMPLETED_SERVICE_STATES = {
+    "FINALIZADO_PENDIENTE_PAGO",
+    "PAGADO",
+}
+DASHBOARD_STUCK_THRESHOLDS_MINUTES: dict[str, int] = {
+    "EN_ESPERA_ASIGNACION": 30,
+    "ASIGNADO": 30,
+    "EN_CAMINO": 60,
+    "EN_SITIO": 90,
+    "EN_DIAGNOSTICO_FISICO": 90,
+    "EN_REPARACION": 180,
+    "ESPERANDO_REPUESTOS": 24 * 60,
+}
+DASHBOARD_ACTION_PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
 
 def _build_request_query():
@@ -157,6 +203,32 @@ def _build_workshop_profile_query():
 def _build_workshop_catalog_query():
     return select(CatalogoServicioTaller).options(
         joinedload(CatalogoServicioTaller.especialidad),
+    )
+
+
+def _build_dashboard_request_query():
+    return select(SolicitudServicio).options(
+        joinedload(SolicitudServicio.incidente).joinedload(Incidente.especialidad_detectada),
+        joinedload(SolicitudServicio.incidente).joinedload(Incidente.especialidad_reportada_cliente),
+        joinedload(SolicitudServicio.taller),
+        joinedload(SolicitudServicio.servicio)
+        .joinedload(Servicio.operario)
+        .joinedload(Operario.persona),
+    )
+
+
+def _build_dashboard_service_query():
+    return select(Servicio).options(
+        joinedload(Servicio.solicitud).joinedload(SolicitudServicio.incidente).joinedload(Incidente.especialidad_detectada),
+        joinedload(Servicio.solicitud).joinedload(SolicitudServicio.taller),
+        joinedload(Servicio.operario).joinedload(Operario.persona),
+        joinedload(Servicio.pago),
+    )
+
+
+def _build_dashboard_operario_query():
+    return select(Operario).options(
+        joinedload(Operario.persona),
     )
 
 
@@ -1380,6 +1452,872 @@ def _build_repair_snapshot(service: Servicio) -> RepairReportSnapshotResponse:
         used_items=used_items,
         final_evidences=final_evidences,
         saved_at=saved_at,
+    )
+
+
+def _resolve_dashboard_period(
+    *,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> tuple[datetime, datetime]:
+    now = utc_now()
+    resolved_to = date_to or now
+    resolved_from = date_from or (resolved_to - timedelta(days=DASHBOARD_DEFAULT_DAYS))
+    return resolved_from, resolved_to
+
+
+def _validate_dashboard_period(
+    *,
+    date_from: datetime,
+    date_to: datetime,
+) -> None:
+    if date_to < date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="date_to must be greater than or equal to date_from.",
+        )
+
+
+def _is_between(
+    value: datetime | None,
+    *,
+    date_from: datetime,
+    date_to: datetime,
+) -> bool:
+    return value is not None and date_from <= value <= date_to
+
+
+def _service_reference_datetime(service: Servicio) -> datetime | None:
+    return (
+        service.fecha_fin
+        or service.fecha_inicio
+        or service.fecha_asignacion_operario
+        or service.solicitud.fecha_respuesta
+        or service.solicitud.fecha_envio
+    )
+
+
+def _service_in_period(
+    service: Servicio,
+    *,
+    date_from: datetime,
+    date_to: datetime,
+) -> bool:
+    return _is_between(_service_reference_datetime(service), date_from=date_from, date_to=date_to)
+
+
+def _payment_reference_datetime(payment: Pago) -> datetime | None:
+    return payment.fecha_confirmacion or payment.fecha_solicitud
+
+
+def _average_decimal(values: list[Decimal]) -> Decimal | None:
+    if not values:
+        return None
+    return _quantize_currency(sum(values) / Decimal(len(values)))
+
+
+def _percentage(numerator: int, denominator: int) -> Decimal | None:
+    if denominator <= 0:
+        return None
+    return _quantize_currency((Decimal(numerator) / Decimal(denominator)) * Decimal("100"))
+
+
+def _minutes_between(start: datetime | None, end: datetime | None) -> Decimal | None:
+    if start is None or end is None or end < start:
+        return None
+    minutes = Decimal(str((end - start).total_seconds() / 60))
+    return _quantize_currency(minutes)
+
+
+def _extract_state_value(payload: Any, *keys: str) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _resolve_service_state_entered_at(
+    *,
+    service: Servicio,
+    service_bitacoras: list[Bitacora],
+) -> datetime | None:
+    current_state = service.estado
+    for event in sorted(
+        service_bitacoras,
+        key=lambda item: (item.fecha_hora, item.id_bitacora),
+        reverse=True,
+    ):
+        new_state = (
+            _extract_state_value(
+                event.datos_nuevos,
+                "new_state",
+                "estado_servicio",
+                "service_state",
+                "service_new_state",
+            )
+            or _extract_state_value(event.datos_nuevos, "estado")
+        )
+        if new_state == current_state:
+            return event.fecha_hora
+
+    if current_state == "ASIGNADO":
+        return service.fecha_asignacion_operario
+    if current_state == "EN_CAMINO":
+        return service.fecha_inicio
+    if current_state == "EN_SITIO":
+        return service.fecha_llegada
+    if current_state in {"COMPLETADO_PENDIENTE_CONFIRMACION", "FINALIZADO_PENDIENTE_PAGO", "PAGADO"}:
+        return service.fecha_fin
+    return (
+        service.fecha_inicio
+        or service.fecha_asignacion_operario
+        or service.solicitud.fecha_respuesta
+        or service.solicitud.fecha_envio
+    )
+
+
+def _get_stuck_services(
+    *,
+    services: list[Servicio],
+    bitacoras_by_service_id: dict[int, list[Bitacora]],
+    now: datetime,
+) -> list[DashboardStuckServiceItem]:
+    stuck_items: list[DashboardStuckServiceItem] = []
+    for service in services:
+        threshold_minutes = DASHBOARD_STUCK_THRESHOLDS_MINUTES.get(service.estado)
+        if threshold_minutes is None:
+            continue
+        entered_at = _resolve_service_state_entered_at(
+            service=service,
+            service_bitacoras=bitacoras_by_service_id.get(service.id_servicio, []),
+        )
+        minutes_in_state = _minutes_between(entered_at, now)
+        if minutes_in_state is None or minutes_in_state <= Decimal(str(threshold_minutes)):
+            continue
+        assigned_operario_name = None
+        if service.operario is not None and service.operario.persona is not None:
+            assigned_operario_name = (
+                f"{service.operario.persona.nombre} {service.operario.persona.apellido}"
+            )
+        stuck_items.append(
+            DashboardStuckServiceItem(
+                service_id=service.id_servicio,
+                incident_id=service.solicitud.incidente.id_incidente,
+                current_state=service.estado,
+                minutes_in_current_state=minutes_in_state,
+                client_reported_description=service.solicitud.incidente.descripcion_cliente,
+                detected_specialty=(
+                    service.solicitud.incidente.especialidad_detectada.nombre
+                    if service.solicitud.incidente.especialidad_detectada is not None
+                    else None
+                ),
+                severity=service.solicitud.incidente.severidad,
+                assigned_operario_name=assigned_operario_name,
+                reason=f"Service exceeded the threshold for {service.estado}.",
+            )
+        )
+    return sorted(
+        stuck_items,
+        key=lambda item: item.minutes_in_current_state or Decimal("0"),
+        reverse=True,
+    )[:10]
+
+
+def _count_items_by_label(items: list[str | None]) -> list[DashboardCountItem]:
+    counts: dict[str, int] = {}
+    for item in items:
+        label = item or "SIN_DATO"
+        counts[label] = counts.get(label, 0) + 1
+    return [
+        DashboardCountItem(label=label, count=count)
+        for label, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    ]
+
+
+def _get_incident_heatmap_points(
+    *,
+    requests_in_period: list[SolicitudServicio],
+) -> list[IncidentHeatmapPoint]:
+    grouped: dict[tuple[Decimal, Decimal, str | None, str | None], int] = {}
+    for request in requests_in_period:
+        incident = request.incidente
+        key = (
+            Decimal(incident.latitud),
+            Decimal(incident.longitud),
+            incident.severidad,
+            incident.especialidad_detectada.nombre
+            if incident.especialidad_detectada is not None
+            else None,
+        )
+        grouped[key] = grouped.get(key, 0) + 1
+    return [
+        IncidentHeatmapPoint(
+            latitud=latitud,
+            longitud=longitud,
+            severidad=severidad,
+            especialidad=especialidad,
+            cantidad=count,
+        )
+        for (latitud, longitud, severidad, especialidad), count in sorted(
+            grouped.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )
+    ]
+
+
+def _get_dashboard_kpis(
+    *,
+    requests_in_period: list[SolicitudServicio],
+    services_in_period: list[Servicio],
+    payments_in_period: list[Pago],
+    ratings_in_period: list[Calificacion],
+    service_bitacoras_by_service_id: dict[int, list[Bitacora]],
+) -> WorkshopDashboardKpiResponse:
+    pending_requests = sum(1 for request in requests_in_period if request.estado == "PENDIENTE")
+    accepted_requests = sum(1 for request in requests_in_period if request.estado == "ACEPTADA")
+    rejected_requests = sum(1 for request in requests_in_period if request.estado == "RECHAZADA")
+    expired_requests = sum(1 for request in requests_in_period if request.estado == "EXPIRADA")
+    active_services = sum(1 for service in services_in_period if service.estado in DASHBOARD_ACTIVE_SERVICE_STATES)
+    completed_services = sum(
+        1 for service in services_in_period if service.estado in DASHBOARD_COMPLETED_SERVICE_STATES
+    )
+    paid_services = sum(1 for service in services_in_period if service.estado == "PAGADO")
+    pending_payment_service_ids = {
+        service.id_servicio
+        for service in services_in_period
+        if service.estado == "FINALIZADO_PENDIENTE_PAGO"
+    }
+    pending_payment_service_ids.update(
+        payment.id_servicio for payment in payments_in_period if payment.estado == "PENDIENTE"
+    )
+
+    total_revenue = _quantize_currency(
+        sum((payment.monto for payment in payments_in_period if payment.estado == "CONFIRMADO"), Decimal("0"))
+    )
+    average_rating = _average_decimal([Decimal(rating.estrellas) for rating in ratings_in_period])
+    acceptance_times = [
+        minutes
+        for minutes in (
+            _minutes_between(request.fecha_envio, request.fecha_respuesta)
+            for request in requests_in_period
+            if request.estado == "ACEPTADA"
+        )
+        if minutes is not None
+    ]
+    completion_times = [
+        minutes
+        for minutes in (
+            _minutes_between(service.fecha_inicio, service.fecha_fin)
+            for service in services_in_period
+        )
+        if minutes is not None
+    ]
+    finalized_services = [
+        service for service in services_in_period if service.estado in DASHBOARD_COMPLETED_SERVICE_STATES
+    ]
+    no_rework_count = 0
+    for service in finalized_services:
+        if not any(
+            event.accion == "FINALIZACION_RECHAZADA_CLIENTE"
+            for event in service_bitacoras_by_service_id.get(service.id_servicio, [])
+        ):
+            no_rework_count += 1
+
+    return WorkshopDashboardKpiResponse(
+        pending_requests=pending_requests,
+        accepted_requests=accepted_requests,
+        rejected_requests=rejected_requests,
+        expired_requests=expired_requests,
+        active_services=active_services,
+        completed_services=completed_services,
+        paid_services=paid_services,
+        pending_payments=len(pending_payment_service_ids),
+        total_revenue=total_revenue,
+        average_rating=average_rating,
+        first_contact_resolution_rate=_percentage(no_rework_count, len(finalized_services)),
+        average_acceptance_time_minutes=_average_decimal(acceptance_times),
+        average_completion_time_minutes=_average_decimal(completion_times),
+    )
+
+
+def _get_operations_metrics(
+    *,
+    requests_in_period: list[SolicitudServicio],
+    services_in_period: list[Servicio],
+    bitacoras_by_service_id: dict[int, list[Bitacora]],
+    now: datetime,
+) -> WorkshopDashboardOperationsResponse:
+    return WorkshopDashboardOperationsResponse(
+        services_by_state=_count_items_by_label([service.estado for service in services_in_period]),
+        requests_by_status=_count_items_by_label([request.estado for request in requests_in_period]),
+        incidents_by_severity=_count_items_by_label(
+            [request.incidente.severidad for request in requests_in_period]
+        ),
+        incidents_by_detected_specialty=_count_items_by_label(
+            [
+                request.incidente.especialidad_detectada.nombre
+                if request.incidente.especialidad_detectada is not None
+                else None
+                for request in requests_in_period
+            ]
+        ),
+        incident_heatmap_points=_get_incident_heatmap_points(
+            requests_in_period=requests_in_period,
+        ),
+        stuck_services=_get_stuck_services(
+            services=services_in_period,
+            bitacoras_by_service_id=bitacoras_by_service_id,
+            now=now,
+        ),
+    )
+
+
+def _build_monthly_revenue(
+    *,
+    confirmed_payments: list[Pago],
+) -> list[MonthlyRevenueItem]:
+    revenue_by_month: dict[str, Decimal] = {}
+    for payment in confirmed_payments:
+        reference_dt = _payment_reference_datetime(payment)
+        if reference_dt is None:
+            continue
+        month_key = reference_dt.strftime("%Y-%m")
+        revenue_by_month[month_key] = revenue_by_month.get(month_key, Decimal("0")) + Decimal(payment.monto)
+    return [
+        MonthlyRevenueItem(month=month, revenue=_quantize_currency(amount))
+        for month, amount in sorted(revenue_by_month.items())
+    ]
+
+
+def _calculate_projected_revenue(
+    *,
+    confirmed_payments: list[Pago],
+    date_from: datetime,
+    date_to: datetime,
+) -> Decimal | None:
+    period_days = Decimal(str(max((date_to - date_from).total_seconds() / 86400, 1)))
+    if not confirmed_payments:
+        return Decimal("0.00")
+    current_revenue = sum((Decimal(payment.monto) for payment in confirmed_payments), Decimal("0"))
+    average_daily_revenue = current_revenue / period_days
+    projected_revenue = average_daily_revenue * Decimal("30")
+    return _quantize_currency(projected_revenue)
+
+
+def _build_prequotation_deviation_items(
+    *,
+    services_in_period: list[Servicio],
+) -> list[PrequotationDeviationItem]:
+    items: list[PrequotationDeviationItem] = []
+    for service in services_in_period:
+        if (
+            service.codigo_precotizacion is None
+            or service.monto_precotizado_min is None
+            or service.monto_precotizado_max is None
+        ):
+            continue
+        final_cost = service.costo_total
+        if final_cost is None and service.pago is not None:
+            final_cost = service.pago.monto
+        if final_cost is None:
+            continue
+        deviation_amount = Decimal("0")
+        deviation_percentage = Decimal("0")
+        status_value = "OK"
+        risk_level = "LOW"
+        if final_cost > service.monto_precotizado_max and service.monto_precotizado_max > 0:
+            deviation_amount = _quantize_currency(final_cost - service.monto_precotizado_max)
+            deviation_percentage = _quantize_currency(
+                (deviation_amount / service.monto_precotizado_max) * Decimal("100")
+            )
+            if deviation_percentage <= Decimal("20"):
+                status_value = "WARNING"
+                risk_level = "MEDIUM"
+            else:
+                status_value = "CRITICAL"
+                risk_level = "HIGH"
+        items.append(
+            PrequotationDeviationItem(
+                service_id=service.id_servicio,
+                incident_id=service.solicitud.incidente.id_incidente,
+                prequotation_code=service.codigo_precotizacion,
+                prequotation_min=service.monto_precotizado_min,
+                prequotation_max=service.monto_precotizado_max,
+                final_cost=final_cost,
+                deviation_amount=deviation_amount,
+                deviation_percentage=deviation_percentage,
+                status=status_value,
+                risk_level=risk_level,
+            )
+        )
+    return sorted(
+        items,
+        key=lambda item: (
+            0 if item.risk_level == "HIGH" else 1 if item.risk_level == "MEDIUM" else 2,
+            -(item.deviation_percentage),
+            -(item.deviation_amount),
+        ),
+    )[:10]
+
+
+def _get_financial_metrics(
+    *,
+    services_in_period: list[Servicio],
+    payments_in_period: list[Pago],
+    date_from: datetime,
+    date_to: datetime,
+) -> WorkshopDashboardFinancialResponse:
+    confirmed_payments = [payment for payment in payments_in_period if payment.estado == "CONFIRMADO"]
+    pending_payments = [payment for payment in payments_in_period if payment.estado == "PENDIENTE"]
+    rejected_payments = [payment for payment in payments_in_period if payment.estado in {"RECHAZADO", "ANULADO"}]
+    return WorkshopDashboardFinancialResponse(
+        total_revenue=_quantize_currency(sum((payment.monto for payment in confirmed_payments), Decimal("0"))),
+        confirmed_payments=len(confirmed_payments),
+        pending_payments=len(pending_payments),
+        rejected_payments=len(rejected_payments),
+        average_ticket=_average_decimal([payment.monto for payment in confirmed_payments]),
+        monthly_revenue=_build_monthly_revenue(confirmed_payments=confirmed_payments),
+        projected_revenue=_calculate_projected_revenue(
+            confirmed_payments=confirmed_payments,
+            date_from=date_from,
+            date_to=date_to,
+        ),
+        prequotation_vs_final=_build_prequotation_deviation_items(services_in_period=services_in_period),
+    )
+
+
+def _build_operario_ranking(
+    *,
+    operario_items: list[OperarioDashboardItem],
+) -> list[OperarioRankingItem]:
+    ranking_items: list[OperarioRankingItem] = []
+    for item in operario_items:
+        completed_component = Decimal(item.completed_services) * Decimal("10")
+        rating_component = (item.average_rating or Decimal("0")) * Decimal("20")
+        time_penalty = Decimal("0")
+        if item.average_completion_time_minutes is not None and item.average_completion_time_minutes > 0:
+            time_penalty = item.average_completion_time_minutes / Decimal("60")
+        efficiency_score = completed_component + rating_component - time_penalty
+        ranking_items.append(
+            OperarioRankingItem(
+                operario_id=item.operario_id,
+                nombre_completo=item.nombre_completo,
+                efficiency_score=_quantize_currency(efficiency_score),
+                completed_services=item.completed_services,
+                average_rating=item.average_rating,
+                average_completion_time_minutes=item.average_completion_time_minutes,
+            )
+        )
+    return sorted(
+        ranking_items,
+        key=lambda item: (
+            -item.efficiency_score,
+            -item.completed_services,
+            -(item.average_rating or Decimal("0")),
+            item.average_completion_time_minutes or Decimal("999999"),
+            item.nombre_completo,
+        ),
+    )
+
+
+def _get_operario_metrics(
+    *,
+    operarios: list[Operario],
+    services_in_period: list[Servicio],
+    ratings_in_period: list[Calificacion],
+) -> WorkshopDashboardOperarioResponse:
+    services_by_operario: dict[int, list[Servicio]] = {}
+    for service in services_in_period:
+        if service.id_persona_operario is not None:
+            services_by_operario.setdefault(service.id_persona_operario, []).append(service)
+
+    ratings_by_persona: dict[int, list[Calificacion]] = {}
+    for rating in ratings_in_period:
+        if rating.receptor_tipo == "PERSONA" and rating.id_receptor is not None:
+            ratings_by_persona.setdefault(rating.id_receptor, []).append(rating)
+
+    items: list[OperarioDashboardItem] = []
+    for operario in operarios:
+        related_services = services_by_operario.get(operario.id_persona, [])
+        active_services = [service for service in related_services if service.estado in DASHBOARD_ACTIVE_SERVICE_STATES]
+        completed_services = [
+            service for service in related_services if service.estado in DASHBOARD_COMPLETED_SERVICE_STATES
+        ]
+        completion_times = [
+            minutes
+            for minutes in (
+                _minutes_between(service.fecha_inicio, service.fecha_fin)
+                for service in completed_services
+            )
+            if minutes is not None
+        ]
+        operario_ratings = ratings_by_persona.get(operario.id_persona, [])
+        average_rating = _average_decimal([Decimal(rating.estrellas) for rating in operario_ratings])
+        risk_flag = None
+        if len(active_services) > 1:
+            risk_flag = "OVERLOADED"
+        elif average_rating is not None and average_rating < Decimal("3.50") and len(operario_ratings) >= 3:
+            risk_flag = "LOW_RATING"
+        elif operario.estado_disponibilidad in {"NO_DISPONIBLE", "BAJA"}:
+            risk_flag = "INACTIVE"
+        items.append(
+            OperarioDashboardItem(
+                operario_id=operario.id_persona,
+                nombre_completo=f"{operario.persona.nombre} {operario.persona.apellido}",
+                estado_disponibilidad=operario.estado_disponibilidad,
+                assigned_services=len(active_services),
+                completed_services=len(completed_services),
+                average_rating=average_rating,
+                average_completion_time_minutes=_average_decimal(completion_times),
+                active_service_id=active_services[0].id_servicio if active_services else None,
+                risk_flag=risk_flag,
+            )
+        )
+    sorted_items = sorted(items, key=lambda item: item.nombre_completo)
+    return WorkshopDashboardOperarioResponse(
+        operarios=sorted_items,
+        operario_ranking=_build_operario_ranking(operario_items=sorted_items),
+    )
+
+
+def _get_reputation_metrics(
+    *,
+    ratings_in_period: list[Calificacion],
+) -> WorkshopDashboardReputationResponse:
+    workshop_average_rating = _average_decimal([Decimal(rating.estrellas) for rating in ratings_in_period])
+    rating_distribution = _count_items_by_label([str(rating.estrellas) for rating in ratings_in_period])
+    low_rating_services = sorted(
+        [
+            LowRatingServiceItem(
+                service_id=rating.id_servicio,
+                incident_id=rating.servicio.solicitud.incidente.id_incidente,
+                rating_id=rating.id_calificacion,
+                stars=rating.estrellas,
+                comment=rating.comentario,
+                rated_at=rating.fecha,
+                rated_target_type=rating.receptor_tipo,
+            )
+            for rating in ratings_in_period
+            if rating.estrellas <= 2
+        ],
+        key=lambda item: (item.rated_at, item.rating_id),
+        reverse=True,
+    )[:10]
+    return WorkshopDashboardReputationResponse(
+        workshop_average_rating=workshop_average_rating,
+        total_ratings=len(ratings_in_period),
+        rating_distribution=rating_distribution,
+        low_rating_services=low_rating_services,
+    )
+
+
+def _get_dashboard_action_items(
+    *,
+    workshop_id: int,
+    requests_in_period: list[SolicitudServicio],
+    services_in_period: list[Servicio],
+    operations: WorkshopDashboardOperationsResponse,
+    financial: WorkshopDashboardFinancialResponse,
+    operarios: list[Operario],
+    ratings_in_period: list[Calificacion],
+    db: Session,
+    now: datetime,
+) -> list[WorkshopDashboardActionItem]:
+    items: list[WorkshopDashboardActionItem] = []
+
+    for request in requests_in_period:
+        if request.estado != "PENDIENTE":
+            continue
+        minutes_to_expiry = _minutes_between(now, request.fecha_expiracion)
+        if minutes_to_expiry is not None and Decimal("0") <= minutes_to_expiry <= Decimal("10"):
+            items.append(
+                WorkshopDashboardActionItem(
+                    priority="HIGH",
+                    type="PENDING_REQUEST_EXPIRING",
+                    title="Solicitud pendiente por expirar",
+                    description=f"La solicitud {request.id_solicitud} expirara en {minutes_to_expiry} minutos.",
+                    related_incident_id=request.id_incidente,
+                    recommended_action="Responder la solicitud antes de que expire.",
+                )
+            )
+
+    for service in services_in_period:
+        if service.estado == "EN_ESPERA_ASIGNACION" and service.id_persona_operario is None:
+            items.append(
+                WorkshopDashboardActionItem(
+                    priority="HIGH",
+                    type="UNASSIGNED_SERVICE",
+                    title="Servicio aceptado sin operario",
+                    description=f"El servicio {service.id_servicio} sigue sin operario asignado.",
+                    related_service_id=service.id_servicio,
+                    related_incident_id=service.solicitud.incidente.id_incidente,
+                    recommended_action="Asignar un operario disponible.",
+                )
+            )
+
+    for stuck_service in operations.stuck_services[:5]:
+        items.append(
+            WorkshopDashboardActionItem(
+                priority="HIGH",
+                type="STUCK_SERVICE",
+                title="Servicio detenido",
+                description=(
+                    f"El servicio {stuck_service.service_id} lleva {stuck_service.minutes_in_current_state} minutos en {stuck_service.current_state}."
+                ),
+                related_service_id=stuck_service.service_id,
+                related_incident_id=stuck_service.incident_id,
+                recommended_action="Revisar operacion de campo y destrabar el caso.",
+            )
+        )
+
+    for service in services_in_period:
+        if service.estado == "FINALIZADO_PENDIENTE_PAGO":
+            items.append(
+                WorkshopDashboardActionItem(
+                    priority="HIGH",
+                    type="PENDING_PAYMENT",
+                    title="Servicio finalizado pendiente de pago",
+                    description=f"El servicio {service.id_servicio} ya esta listo y aun no fue pagado.",
+                    related_service_id=service.id_servicio,
+                    related_incident_id=service.solicitud.incidente.id_incidente,
+                    recommended_action="Hacer seguimiento al cobro pendiente.",
+                )
+            )
+
+    for deviation in financial.prequotation_vs_final:
+        if deviation.status == "OK":
+            continue
+        items.append(
+            WorkshopDashboardActionItem(
+                priority="MEDIUM",
+                type="PREQUOTATION_DEVIATION",
+                title="Costo final por encima de la precotizacion",
+                description=f"El servicio {deviation.service_id} excede la precotizacion en {deviation.deviation_percentage}%.",
+                related_service_id=deviation.service_id,
+                related_incident_id=deviation.incident_id,
+                recommended_action="Validar la justificacion tecnica y economica del cierre.",
+            )
+        )
+
+    for rating in sorted(
+        [rating for rating in ratings_in_period if rating.estrellas <= 2],
+        key=lambda item: item.fecha,
+        reverse=True,
+    )[:3]:
+        items.append(
+            WorkshopDashboardActionItem(
+                priority="MEDIUM",
+                type="LOW_RATING",
+                title="Calificacion baja recibida",
+                description=f"El servicio {rating.id_servicio} recibio {rating.estrellas} estrellas.",
+                related_service_id=rating.id_servicio,
+                related_incident_id=rating.servicio.solicitud.incidente.id_incidente,
+                recommended_action="Revisar el comentario y ejecutar seguimiento de calidad.",
+            )
+        )
+
+    active_catalog_specialty_ids = set(
+        db.scalars(
+            select(CatalogoServicioTaller.id_especialidad).where(
+                CatalogoServicioTaller.id_taller == workshop_id,
+                CatalogoServicioTaller.activo.is_(True),
+            )
+        )
+    )
+    specialty_counts: dict[int, int] = {}
+    for request in requests_in_period:
+        specialty_id = request.incidente.id_especialidad_detectada
+        if specialty_id is None:
+            continue
+        specialty_counts[specialty_id] = specialty_counts.get(specialty_id, 0) + 1
+    missing_specialty_ids = [
+        specialty_id
+        for specialty_id in specialty_counts
+        if specialty_id not in active_catalog_specialty_ids
+    ]
+    specialty_map = _get_specialties_by_ids(db, specialty_ids=missing_specialty_ids) if missing_specialty_ids else {}
+    for specialty_id in sorted(missing_specialty_ids, key=lambda item: (-specialty_counts[item], item))[:3]:
+        specialty = specialty_map.get(specialty_id)
+        items.append(
+            WorkshopDashboardActionItem(
+                priority="MEDIUM",
+                type="CATALOG_GAP",
+                title="Especialidad sin catalogo activo",
+                description=(
+                    f"La especialidad {specialty.nombre if specialty is not None else specialty_id} aparece en incidentes recientes sin catalogo activo."
+                ),
+                recommended_action="Configurar un servicio activo en CU26 para evitar bloqueos de precotizacion.",
+            )
+        )
+
+    for operario in operarios:
+        if operario.estado_disponibilidad not in {"NO_DISPONIBLE", "BAJA"}:
+            continue
+        items.append(
+            WorkshopDashboardActionItem(
+                priority="LOW",
+                type="OPERARIO_UNAVAILABLE",
+                title="Operario no disponible",
+                description=(
+                    f"{operario.persona.nombre} {operario.persona.apellido} esta en estado {operario.estado_disponibilidad}."
+                ),
+                recommended_action="Confirmar disponibilidad real o redistribuir carga operativa.",
+            )
+        )
+
+    return sorted(
+        items,
+        key=lambda item: (
+            DASHBOARD_ACTION_PRIORITY_ORDER.get(item.priority, 99),
+            item.related_service_id or 0,
+            item.related_incident_id or 0,
+            item.title,
+        ),
+    )[:10]
+
+
+def get_workshop_dashboard_overview(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> WorkshopDashboardOverviewResponse:
+    resolved_from, resolved_to = _resolve_dashboard_period(date_from=date_from, date_to=date_to)
+    _validate_dashboard_period(date_from=resolved_from, date_to=resolved_to)
+
+    requests = list(
+        db.scalars(
+            _build_dashboard_request_query()
+            .where(SolicitudServicio.id_taller == admin_context.workshop_id)
+            .order_by(SolicitudServicio.fecha_envio.desc())
+        )
+    )
+    services = list(
+        db.scalars(
+            _build_dashboard_service_query()
+            .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+            .where(SolicitudServicio.id_taller == admin_context.workshop_id)
+            .order_by(Servicio.id_servicio.desc())
+        )
+    )
+    operarios = list(
+        db.scalars(
+            _build_dashboard_operario_query()
+            .where(Operario.id_taller == admin_context.workshop_id)
+            .order_by(Operario.id_persona.asc())
+        )
+    )
+    ratings = list(
+        db.scalars(
+            select(Calificacion)
+            .options(
+                joinedload(Calificacion.servicio)
+                .joinedload(Servicio.solicitud)
+                .joinedload(SolicitudServicio.incidente)
+            )
+            .join(Servicio, Servicio.id_servicio == Calificacion.id_servicio)
+            .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+            .where(SolicitudServicio.id_taller == admin_context.workshop_id)
+            .order_by(Calificacion.fecha.desc())
+        )
+    )
+
+    request_ids = [request.id_solicitud for request in requests]
+    service_ids = [service.id_servicio for service in services]
+    incident_ids = list({request.id_incidente for request in requests})
+    payment_ids = [service.pago.id_pago for service in services if service.pago is not None]
+    bitacora_filters = []
+    if request_ids:
+        bitacora_filters.append(Bitacora.id_solicitud.in_(request_ids))
+    if service_ids:
+        bitacora_filters.append(Bitacora.id_servicio.in_(service_ids))
+    if incident_ids:
+        bitacora_filters.append(Bitacora.id_incidente.in_(incident_ids))
+    if payment_ids:
+        bitacora_filters.append(Bitacora.id_pago.in_(payment_ids))
+    bitacoras = list(
+        db.scalars(
+            select(Bitacora)
+            .where(or_(*bitacora_filters))
+            .order_by(Bitacora.fecha_hora.desc(), Bitacora.id_bitacora.desc())
+        )
+    ) if bitacora_filters else []
+
+    requests_in_period = [
+        request
+        for request in requests
+        if _is_between(request.fecha_envio, date_from=resolved_from, date_to=resolved_to)
+    ]
+    services_in_period = [
+        service
+        for service in services
+        if _service_in_period(service, date_from=resolved_from, date_to=resolved_to)
+    ]
+    payments_in_period = [
+        service.pago
+        for service in services
+        if service.pago is not None
+        and _is_between(
+            _payment_reference_datetime(service.pago),
+            date_from=resolved_from,
+            date_to=resolved_to,
+        )
+    ]
+    ratings_in_period = [
+        rating
+        for rating in ratings
+        if _is_between(rating.fecha, date_from=resolved_from, date_to=resolved_to)
+    ]
+    bitacoras_by_service_id: dict[int, list[Bitacora]] = {}
+    for event in bitacoras:
+        if event.id_servicio is not None:
+            bitacoras_by_service_id.setdefault(event.id_servicio, []).append(event)
+
+    now = utc_now()
+    operations = _get_operations_metrics(
+        requests_in_period=requests_in_period,
+        services_in_period=services_in_period,
+        bitacoras_by_service_id=bitacoras_by_service_id,
+        now=now,
+    )
+    financial = _get_financial_metrics(
+        services_in_period=services_in_period,
+        payments_in_period=payments_in_period,
+        date_from=resolved_from,
+        date_to=resolved_to,
+    )
+    return WorkshopDashboardOverviewResponse(
+        period=WorkshopDashboardPeriodResponse(date_from=resolved_from, date_to=resolved_to),
+        kpis=_get_dashboard_kpis(
+            requests_in_period=requests_in_period,
+            services_in_period=services_in_period,
+            payments_in_period=payments_in_period,
+            ratings_in_period=ratings_in_period,
+            service_bitacoras_by_service_id=bitacoras_by_service_id,
+        ),
+        operations=operations,
+        financial=financial,
+        operarios=_get_operario_metrics(
+            operarios=operarios,
+            services_in_period=services_in_period,
+            ratings_in_period=ratings_in_period,
+        ),
+        reputation=_get_reputation_metrics(ratings_in_period=ratings_in_period),
+        action_items=_get_dashboard_action_items(
+            workshop_id=admin_context.workshop_id,
+            requests_in_period=requests_in_period,
+            services_in_period=services_in_period,
+            operations=operations,
+            financial=financial,
+            operarios=operarios,
+            ratings_in_period=ratings_in_period,
+            db=db,
+            now=now,
+        ),
     )
 
 
