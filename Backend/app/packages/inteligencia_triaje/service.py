@@ -333,6 +333,10 @@ def _build_operario_assigned_service_summary(service: Servicio) -> OperarioAssig
         detected_specialty=_build_specialty_summary(incident.especialidad_detectada),
         severity=incident.severidad,
         ai_summary=incident.diagnostico_ia_resumen,
+        prequotation_code=service.codigo_precotizacion,
+        prequotation_min=service.monto_precotizado_min,
+        prequotation_max=service.monto_precotizado_max,
+        prequotation_currency="BOB" if service.codigo_precotizacion is not None else None,
     )
 
 
@@ -367,6 +371,10 @@ def _build_operario_structured_profile_response(
         ),
         requiere_grua=_extract_profile_bool(diagnostico.get("requiere_grua")),
         observaciones=_extract_profile_str(diagnostico.get("observaciones")),
+        prequotation_code=service.codigo_precotizacion,
+        prequotation_min=service.monto_precotizado_min,
+        prequotation_max=service.monto_precotizado_max,
+        prequotation_currency="BOB" if service.codigo_precotizacion is not None else None,
         requiere_revision_manual=incident.requiere_revision_manual,
         diagnostico_ia_json=incident.diagnostico_ia_json,
         evidence_summary=_build_evidence_summary(ordered_evidences),

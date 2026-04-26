@@ -27,6 +27,7 @@ from .schemas import (
     NavigationStatusResponse,
     NotificationInboxItem,
     NotificationReadResponse,
+    ServicePrequotationResponse,
     ServiceProgressHistoryItem,
     ServiceProgressSnapshotResponse,
     ServiceProgressUpdateRequest,
@@ -43,6 +44,7 @@ from .service import (
     get_my_unread_notification_count,
     hire_incident_workshop,
     get_incident_recommendations,
+    get_client_service_prequotation,
     decide_service_finalization,
     mark_notification_as_read,
     register_notification_device,
@@ -231,6 +233,22 @@ def client_service_finalization_decision(
         db=db,
         ip_origen=request.client.host if request.client is not None else None,
         user_agent=request.headers.get("user-agent"),
+    )
+
+
+@client_router.get(
+    "/services/{service_id}/prequotation",
+    response_model=ServicePrequotationResponse,
+)
+def client_service_prequotation(
+    service_id: int,
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> ServicePrequotationResponse:
+    return get_client_service_prequotation(
+        service_id=service_id,
+        current_user=current_user,
+        db=db,
     )
 
 

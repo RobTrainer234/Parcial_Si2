@@ -153,6 +153,10 @@ class OperarioAssignedServiceSummary(BaseModel):
     detected_specialty: SpecialtySummaryResponse | None = None
     severity: str | None = None
     ai_summary: str | None = None
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
 
 
 class OperarioServiceWorkshopSummary(BaseModel):
@@ -178,6 +182,10 @@ class OperarioStructuredProfileResponse(BaseModel):
     herramientas_sugeridas: list[str] | None = None
     requiere_grua: bool | None = None
     observaciones: str | None = None
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
     requiere_revision_manual: bool
     diagnostico_ia_json: dict[str, Any] | None = None
     evidence_summary: IncidentEvidenceSummaryResponse

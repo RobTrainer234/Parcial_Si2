@@ -318,6 +318,18 @@ class IncidentRecommendationsResponse(BaseModel):
     message: str
 
 
+class ServicePrequotationResponse(BaseModel):
+    service_id: int
+    incident_id: int
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
+    catalog_service_name: str | None = None
+    incluye_repuestos_basicos: bool | None = None
+    message: str
+
+
 class HireWorkshopRequest(_NormalizedModel):
     workshop_id: int
 

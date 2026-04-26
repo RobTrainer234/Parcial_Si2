@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.models import (
     Administrador,
     Bitacora,
+    CatalogoServicioTaller,
     DispositivoUsuario,
     Evidencia,
     Incidente,
@@ -51,6 +52,7 @@ from .schemas import (
     IncidentDiagnosisSummaryResponse,
     IncidentRecommendationsResponse,
     RecommendedWorkshopResponse,
+    ServicePrequotationResponse,
     NotificationInboxItem,
     NotificationReadResponse,
     RouteStepSummary,
@@ -124,6 +126,7 @@ RECOMMENDATION_MATCHMAKING_ACTIONS = {
     "MATCHMAKING_CANDIDATO_SELECCIONADO",
     "SOLICITUD_SERVICIO_CREADA",
 }
+PREQUOTATION_CURRENCY = "BOB"
 
 
 def _build_service_query():
@@ -144,6 +147,13 @@ def _build_incident_recommendations_query():
         joinedload(Incidente.especialidad_detectada),
         selectinload(Incidente.solicitudes).joinedload(SolicitudServicio.taller),
     )
+
+
+def _normalize_catalog_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.split()).upper()
+    return normalized or None
 
 
 def _get_assigned_service(
@@ -187,6 +197,24 @@ def _get_client_owned_service(
             detail="Client service not found.",
         )
     return service
+
+
+def _get_latest_service_prequotation_payload(
+    db: Session,
+    *,
+    service_id: int,
+) -> dict[str, object] | None:
+    event = db.scalar(
+        select(Bitacora)
+        .where(
+            Bitacora.id_servicio == service_id,
+            Bitacora.accion == "PRECOTIZACION_TECNICA_GENERADA",
+        )
+        .order_by(Bitacora.fecha_hora.desc(), Bitacora.id_bitacora.desc())
+    )
+    if event is None or not isinstance(event.datos_nuevos, dict):
+        return None
+    return event.datos_nuevos
 
 
 def _get_client_owned_incident(
@@ -1050,6 +1078,7 @@ def _build_recommended_workshop_response(
     incident: Incidente,
     insurance_map: dict[int, list[Seguro]],
     latest_requests_by_workshop: dict[int, SolicitudServicio],
+    catalog_estimate_map: dict[int, tuple[Decimal, str]],
     is_top_recommendation: bool,
     active_request_id: int | None,
 ) -> RecommendedWorkshopResponse:
@@ -1060,6 +1089,7 @@ def _build_recommended_workshop_response(
         detected_specialty_id=incident.id_especialidad_detectada,
     )
     distance_meters = (candidate.distance_km * Decimal("1000")).quantize(Decimal("0.0001"))
+    catalog_estimate = catalog_estimate_map.get(candidate.taller.id_taller)
 
     return RecommendedWorkshopResponse(
         workshop_id=candidate.taller.id_taller,
@@ -1080,12 +1110,122 @@ def _build_recommended_workshop_response(
             else candidate.score_total
         ),
         estimated_arrival_text=_estimate_workshop_arrival_text(candidate.distance_km),
-        estimated_cost=None,
-        currency=None,
+        estimated_cost=(catalog_estimate[0] if catalog_estimate is not None else None),
+        currency=(catalog_estimate[1] if catalog_estimate is not None else None),
         current_matchmaking_status=(
             latest_request.estado if latest_request is not None else None
         ),
         is_top_recommendation=is_top_recommendation,
+    )
+
+
+def _build_catalog_match_text(incident: Incidente) -> str:
+    diagnosis_parts: list[str] = []
+    if incident.diagnostico_ia_resumen:
+        diagnosis_parts.append(incident.diagnostico_ia_resumen)
+    if incident.diagnostico_ia_json:
+        diagnosis_parts.append(str(incident.diagnostico_ia_json))
+    return _normalize_catalog_name(" ".join(diagnosis_parts)) or ""
+
+
+def _select_catalog_for_estimate(
+    *,
+    catalog_rows: list[CatalogoServicioTaller],
+    incident: Incidente,
+) -> CatalogoServicioTaller | None:
+    if not catalog_rows:
+        return None
+    diagnosis_text = _build_catalog_match_text(incident)
+    ordered = sorted(
+        catalog_rows,
+        key=lambda item: (
+            0
+            if (
+                diagnosis_text
+                and _normalize_catalog_name(item.nombre) is not None
+                and _normalize_catalog_name(item.nombre) in diagnosis_text
+            )
+            else 1,
+            item.precio_base_min,
+            item.precio_base_max,
+            item.id_catalogo_servicio,
+        ),
+    )
+    return ordered[0]
+
+
+def _get_workshop_catalog_estimate_map(
+    db: Session,
+    *,
+    workshop_ids: list[int],
+    incident: Incidente,
+) -> dict[int, tuple[Decimal, str]]:
+    if not workshop_ids or incident.id_especialidad_detectada is None:
+        return {}
+    catalog_rows = list(
+        db.scalars(
+            select(CatalogoServicioTaller)
+            .where(
+                CatalogoServicioTaller.id_taller.in_(workshop_ids),
+                CatalogoServicioTaller.id_especialidad == incident.id_especialidad_detectada,
+                CatalogoServicioTaller.activo.is_(True),
+            )
+            .order_by(
+                CatalogoServicioTaller.id_taller,
+                CatalogoServicioTaller.precio_base_min.asc(),
+                CatalogoServicioTaller.precio_base_max.asc(),
+                CatalogoServicioTaller.id_catalogo_servicio.asc(),
+            )
+        )
+    )
+    grouped: dict[int, list[CatalogoServicioTaller]] = {}
+    for row in catalog_rows:
+        grouped.setdefault(row.id_taller, []).append(row)
+
+    estimate_map: dict[int, tuple[Decimal, str]] = {}
+    for workshop_id, items in grouped.items():
+        selected = _select_catalog_for_estimate(catalog_rows=items, incident=incident)
+        if selected is None:
+            continue
+        midpoint = ((selected.precio_base_min + selected.precio_base_max) / Decimal("2")).quantize(
+            Decimal("0.01")
+        )
+        estimate_map[workshop_id] = (midpoint, PREQUOTATION_CURRENCY)
+    return estimate_map
+
+
+def _build_client_prequotation_response(
+    *,
+    service: Servicio,
+    payload: dict[str, object] | None,
+) -> ServicePrequotationResponse:
+    if (
+        service.codigo_precotizacion is None
+        or service.monto_precotizado_min is None
+        or service.monto_precotizado_max is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Service prequotation is not available yet.",
+        )
+    return ServicePrequotationResponse(
+        service_id=service.id_servicio,
+        incident_id=service.solicitud.incidente.id_incidente,
+        prequotation_code=service.codigo_precotizacion,
+        prequotation_min=service.monto_precotizado_min,
+        prequotation_max=service.monto_precotizado_max,
+        prequotation_currency=PREQUOTATION_CURRENCY,
+        catalog_service_name=(
+            str(payload.get("catalog_service_name"))
+            if payload is not None and payload.get("catalog_service_name") is not None
+            else None
+        ),
+        incluye_repuestos_basicos=(
+            bool(payload.get("incluye_repuestos_basicos"))
+            if payload is not None and payload.get("incluye_repuestos_basicos") is not None
+            else None
+        ),
+        message="Esta precotizacion es referencial antes del diagnostico fisico del operario.",
     )
 
 
@@ -1534,6 +1674,11 @@ def get_incident_recommendations(
         )
     )
     active_request_id = active_request.id_solicitud if active_request is not None else None
+    catalog_estimate_map = _get_workshop_catalog_estimate_map(
+        db=db,
+        workshop_ids=[candidate.taller.id_taller for candidate in ordered_candidates],
+        incident=incident,
+    )
 
     recommendations = [
         _build_recommended_workshop_response(
@@ -1541,6 +1686,7 @@ def get_incident_recommendations(
             incident=incident,
             insurance_map=insurance_map,
             latest_requests_by_workshop=latest_requests_by_workshop,
+            catalog_estimate_map=catalog_estimate_map,
             is_top_recommendation=index == 0,
             active_request_id=active_request_id,
         )
@@ -1715,6 +1861,27 @@ def hire_incident_workshop(
         workshop_name=selected_candidate.taller.nombre_comercial,
         request_state=request_row.estado,
         message="Workshop hiring request created successfully.",
+    )
+
+
+def get_client_service_prequotation(
+    *,
+    service_id: int,
+    current_user: Usuario,
+    db: Session,
+) -> ServicePrequotationResponse:
+    service = _get_client_owned_service(
+        db,
+        service_id=service_id,
+        cliente_id=current_user.id_persona,
+    )
+    payload = _get_latest_service_prequotation_payload(
+        db,
+        service_id=service.id_servicio,
+    )
+    return _build_client_prequotation_response(
+        service=service,
+        payload=payload,
     )
 
 

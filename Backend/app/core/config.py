@@ -47,6 +47,7 @@ class Settings:
     triage_min_confidence: int
     triage_ai_timeout_seconds: int
     matchmaking_request_ttl_seconds: int
+    workshop_max_action_radius_km: int
     maps_provider: str
     maps_base_url: str
     maps_api_key: str | None
@@ -87,6 +88,9 @@ def get_settings() -> Settings:
         triage_ai_timeout_seconds=int(os.getenv("TRIAGE_AI_TIMEOUT_SECONDS", "30")),
         matchmaking_request_ttl_seconds=int(
             os.getenv("MATCHMAKING_REQUEST_TTL_SECONDS", "120")
+        ),
+        workshop_max_action_radius_km=int(
+            os.getenv("WORKSHOP_MAX_ACTION_RADIUS_KM", "100")
         ),
         maps_provider=os.getenv("MAPS_PROVIDER", "osrm"),
         maps_base_url=os.getenv(

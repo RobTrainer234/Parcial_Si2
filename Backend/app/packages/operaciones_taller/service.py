@@ -5,13 +5,14 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import (
     Administrador,
     Bitacora,
+    CatalogoServicioTaller,
     Evidencia,
     Especialidad,
     Incidente,
@@ -56,6 +57,9 @@ from .schemas import (
     WorkshopRequestDecisionRequest,
     WorkshopRequestDecisionResponse,
     WorkshopRequestDetailResponse,
+    WorkshopCatalogServiceCreateRequest,
+    WorkshopCatalogServiceResponse,
+    WorkshopCatalogServiceUpdateRequest,
     WorkshopConfiguredSpecialtyResponse,
     WorkshopMediaFileResponse,
     WorkshopMediaUploadRequest,
@@ -79,6 +83,20 @@ REPAIR_REPORT_NEXT_STATE = "COMPLETADO_PENDIENTE_CONFIRMACION"
 REPORT_NOTES_VERSION = 1
 WORKSHOP_IMAGE_MIME_PREFIX = "image/"
 WORKSHOP_CERTIFICATE_ALLOWED_MIME_PREFIXES = ("application/pdf", "image/")
+PREQUOTATION_CURRENCY = "BOB"
+PREQUOTATION_SEVERITY_FACTORS: dict[str, Decimal] = {
+    "BAJA": Decimal("1.00"),
+    "MEDIA": Decimal("1.15"),
+    "ALTA": Decimal("1.35"),
+    "CRITICA": Decimal("1.60"),
+}
+PREQUOTATION_MIN_FACTOR = Decimal("1.00")
+PREQUOTATION_MAX_FACTOR = Decimal("1.80")
+PREQUOTATION_HISTORICAL_SERVICE_STATES = {
+    "COMPLETADO_PENDIENTE_CONFIRMACION",
+    "FINALIZADO_PENDIENTE_PAGO",
+    "PAGADO",
+}
 
 
 def _build_request_query():
@@ -136,6 +154,12 @@ def _build_workshop_profile_query():
     )
 
 
+def _build_workshop_catalog_query():
+    return select(CatalogoServicioTaller).options(
+        joinedload(CatalogoServicioTaller.especialidad),
+    )
+
+
 def _normalize_text(value: str) -> str:
     return " ".join(value.split())
 
@@ -156,6 +180,17 @@ def _normalize_phone(phone: str | None) -> str | None:
         return None
     normalized = phone.strip()
     return normalized or None
+
+
+def _normalize_catalog_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = _normalize_text(value).upper()
+    return normalized or None
+
+
+def _quantize_currency(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
 
 
 def _build_staff_specialty_response(association: OperarioEspecialidad) -> StaffSpecialtyResponse:
@@ -242,6 +277,23 @@ def _build_workshop_profile_response(taller: Taller) -> WorkshopProfileResponse:
     )
 
 
+def _serialize_workshop_catalog_service(
+    item: CatalogoServicioTaller,
+) -> WorkshopCatalogServiceResponse:
+    return WorkshopCatalogServiceResponse(
+        catalog_id=item.id_catalogo_servicio,
+        workshop_id=item.id_taller,
+        id_especialidad=item.id_especialidad,
+        especialidad_nombre=item.especialidad.nombre,
+        nombre=item.nombre,
+        descripcion=item.descripcion,
+        precio_base_min=item.precio_base_min,
+        precio_base_max=item.precio_base_max,
+        incluye_repuestos_basicos=item.incluye_repuestos_basicos,
+        activo=item.activo,
+    )
+
+
 def _get_admin_workshop(
     *,
     db: Session,
@@ -290,6 +342,57 @@ def _get_workshop_media_file(
             detail="Workshop media file not found.",
         )
     return file_row
+
+
+def _get_workshop_catalog_service(
+    *,
+    db: Session,
+    catalog_id: int,
+    workshop_id: int,
+) -> CatalogoServicioTaller:
+    catalog_row = db.scalar(
+        _build_workshop_catalog_query().where(
+            CatalogoServicioTaller.id_catalogo_servicio == catalog_id,
+            CatalogoServicioTaller.id_taller == workshop_id,
+        )
+    )
+    if catalog_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop catalog service not found.",
+        )
+    return catalog_row
+
+
+def _get_latest_prequotation_payload(
+    *,
+    db: Session,
+    service_id: int,
+) -> dict[str, Any] | None:
+    event = db.scalar(
+        select(Bitacora)
+        .where(
+            Bitacora.id_servicio == service_id,
+            Bitacora.accion == "PRECOTIZACION_TECNICA_GENERADA",
+        )
+        .order_by(Bitacora.fecha_hora.desc(), Bitacora.id_bitacora.desc())
+    )
+    if event is None or not isinstance(event.datos_nuevos, dict):
+        return None
+    return event.datos_nuevos
+
+
+def _get_catalog_service_name_from_prequotation(
+    *,
+    db: Session,
+    service: Servicio | None,
+) -> str | None:
+    if service is None or service.codigo_precotizacion is None:
+        return None
+    payload = _get_latest_prequotation_payload(db=db, service_id=service.id_servicio)
+    if payload is None or payload.get("catalog_service_name") is None:
+        return None
+    return str(payload["catalog_service_name"])
 
 
 def _validate_workshop_media_upload(
@@ -497,6 +600,332 @@ def _create_workshop_profile_bitacora_event(
         hash_evento="",
         id_usuario=admin_context.user.id_usuario,
     )
+
+
+def _create_workshop_catalog_bitacora_event(
+    *,
+    admin_context: WorkshopAdminContext,
+    accion: str,
+    descripcion: str,
+    datos_nuevos: dict[str, Any],
+    datos_originales: dict[str, Any] | None,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> Bitacora:
+    return Bitacora(
+        accion=accion,
+        tipo_evento="CONFIGURACION_TALLER",
+        descripcion=descripcion,
+        entidad_principal="USUARIO",
+        id_entidad_principal=admin_context.user.id_usuario,
+        datos_originales=datos_originales,
+        datos_nuevos=datos_nuevos,
+        ip_origen=ip_origen,
+        user_agent=user_agent,
+        hash_evento="",
+        id_usuario=admin_context.user.id_usuario,
+    )
+
+
+def _create_prequotation_bitacora_event(
+    *,
+    admin_context: WorkshopAdminContext,
+    incident: Incidente,
+    request_row: SolicitudServicio,
+    service: Servicio,
+    payload: dict[str, Any],
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> Bitacora:
+    return Bitacora(
+        accion="PRECOTIZACION_TECNICA_GENERADA",
+        tipo_evento="IA",
+        descripcion="Se genero una precotizacion tecnica auditable a partir del triaje y el catalogo del taller.",
+        entidad_principal="SERVICIO",
+        id_entidad_principal=service.id_servicio,
+        datos_nuevos=payload,
+        ip_origen=ip_origen,
+        user_agent=user_agent,
+        hash_evento="",
+        id_usuario=admin_context.user.id_usuario,
+        id_incidente=incident.id_incidente,
+        id_solicitud=request_row.id_solicitud,
+        id_servicio=service.id_servicio,
+    )
+
+
+def _ensure_catalog_specialty_exists(
+    *,
+    db: Session,
+    specialty_id: int,
+) -> Especialidad:
+    specialty = db.scalar(
+        select(Especialidad).where(Especialidad.id_especialidad == specialty_id)
+    )
+    if specialty is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unknown specialty id.",
+        )
+    return specialty
+
+
+def _ensure_catalog_duplicate_rules(
+    *,
+    db: Session,
+    workshop_id: int,
+    specialty_id: int,
+    normalized_name: str,
+    exclude_catalog_id: int | None = None,
+) -> None:
+    duplicate_active_same_specialty = db.scalar(
+        select(CatalogoServicioTaller.id_catalogo_servicio).where(
+            CatalogoServicioTaller.id_taller == workshop_id,
+            CatalogoServicioTaller.id_especialidad == specialty_id,
+            func.lower(CatalogoServicioTaller.nombre) == normalized_name.lower(),
+            CatalogoServicioTaller.activo.is_(True),
+            CatalogoServicioTaller.id_catalogo_servicio != exclude_catalog_id
+            if exclude_catalog_id is not None
+            else True,
+        )
+    )
+    if duplicate_active_same_specialty is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An active catalog service with the same specialty and name already exists.",
+        )
+
+    duplicate_name_in_workshop = db.scalar(
+        select(CatalogoServicioTaller.id_catalogo_servicio).where(
+            CatalogoServicioTaller.id_taller == workshop_id,
+            func.lower(CatalogoServicioTaller.nombre) == normalized_name.lower(),
+            CatalogoServicioTaller.id_catalogo_servicio != exclude_catalog_id
+            if exclude_catalog_id is not None
+            else True,
+        )
+    )
+    if duplicate_name_in_workshop is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Catalog service name already exists for this workshop.",
+        )
+
+
+def _validate_prequotation_prerequisites(incident: Incidente) -> None:
+    if (
+        incident.fecha_triaje is None
+        or incident.id_especialidad_detectada is None
+        or incident.severidad is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident triage is incomplete for technical prequotation.",
+        )
+    if incident.requiere_revision_manual:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident still requires manual review before technical prequotation.",
+        )
+
+
+def _get_catalog_match_text(incident: Incidente) -> str:
+    diagnosis_parts: list[str] = []
+    if incident.diagnostico_ia_resumen:
+        diagnosis_parts.append(incident.diagnostico_ia_resumen)
+    if incident.diagnostico_ia_json:
+        diagnosis_parts.append(json.dumps(incident.diagnostico_ia_json, ensure_ascii=False, sort_keys=True))
+    return _normalize_catalog_name(" ".join(diagnosis_parts)) or ""
+
+
+def _select_catalog_service_for_prequotation(
+    *,
+    db: Session,
+    incident: Incidente,
+    workshop_id: int,
+) -> CatalogoServicioTaller:
+    _validate_prequotation_prerequisites(incident)
+    catalog_rows = list(
+        db.scalars(
+            _build_workshop_catalog_query().where(
+                CatalogoServicioTaller.id_taller == workshop_id,
+                CatalogoServicioTaller.id_especialidad == incident.id_especialidad_detectada,
+                CatalogoServicioTaller.activo.is_(True),
+            )
+        )
+    )
+    if not catalog_rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "No active catalog service matches the detected specialty for this workshop. "
+                "Configure CU26 catalog before accepting the request."
+            ),
+        )
+
+    diagnosis_text = _get_catalog_match_text(incident)
+    ordered = sorted(
+        catalog_rows,
+        key=lambda item: (
+            0
+            if (
+                diagnosis_text
+                and _normalize_catalog_name(item.nombre) is not None
+                and _normalize_catalog_name(item.nombre) in diagnosis_text
+            )
+            else 1,
+            item.precio_base_min,
+            item.precio_base_max,
+            item.id_catalogo_servicio,
+        ),
+    )
+    return ordered[0]
+
+
+def _estimate_prequotation_complexity(
+    *,
+    db: Session,
+    incident: Incidente,
+    workshop_id: int,
+    catalog_row: CatalogoServicioTaller,
+) -> tuple[Decimal, str, int]:
+    base_midpoint = (catalog_row.precio_base_min + catalog_row.precio_base_max) / Decimal("2")
+    history_services = list(
+        db.scalars(
+            select(Servicio)
+            .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+            .join(Incidente, Incidente.id_incidente == SolicitudServicio.id_incidente)
+            .where(
+                SolicitudServicio.id_taller == workshop_id,
+                Incidente.id_especialidad_detectada == incident.id_especialidad_detectada,
+                Servicio.estado.in_(tuple(PREQUOTATION_HISTORICAL_SERVICE_STATES)),
+                or_(
+                    Servicio.costo_total.is_not(None),
+                    Servicio.costo_mano_obra.is_not(None),
+                ),
+            )
+            .order_by(Servicio.id_servicio.desc())
+        )
+    )
+    historical_costs: list[Decimal] = []
+    for service in history_services:
+        effective_cost = service.costo_total
+        if effective_cost is None or effective_cost <= 0:
+            effective_cost = service.costo_mano_obra
+        if effective_cost is None or effective_cost <= 0:
+            continue
+        historical_costs.append(Decimal(effective_cost))
+
+    if historical_costs and base_midpoint > 0:
+        average_cost = sum(historical_costs) / Decimal(len(historical_costs))
+        factor = average_cost / base_midpoint
+        factor = max(PREQUOTATION_MIN_FACTOR, min(PREQUOTATION_MAX_FACTOR, factor))
+        return (factor.quantize(Decimal("0.01")), "HISTORICAL", len(historical_costs))
+
+    fallback_factor = PREQUOTATION_SEVERITY_FACTORS.get(
+        incident.severidad or "",
+        PREQUOTATION_MIN_FACTOR,
+    )
+    fallback_factor = max(PREQUOTATION_MIN_FACTOR, min(PREQUOTATION_MAX_FACTOR, fallback_factor))
+    return (fallback_factor.quantize(Decimal("0.01")), "SEVERITY_FALLBACK", 0)
+
+
+def _generate_prequotation_code(
+    *,
+    db: Session,
+    service_id: int,
+) -> str:
+    for attempt in range(3):
+        timestamp = utc_now()
+        suffix = f"-{attempt}" if attempt else ""
+        candidate = f"PRE-{service_id}-{timestamp:%Y%m%d%H%M%S%f}{suffix}"
+        exists = db.scalar(
+            select(Servicio.id_servicio).where(Servicio.codigo_precotizacion == candidate)
+        )
+        if exists is None:
+            return candidate
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Prequotation code could not be generated uniquely.",
+    )
+
+
+def _build_prequotation_payload(
+    *,
+    incident: Incidente,
+    request_row: SolicitudServicio,
+    service: Servicio,
+    catalog_row: CatalogoServicioTaller,
+    complexity_source: str,
+    history_sample_size: int,
+    complexity_factor: Decimal,
+) -> dict[str, Any]:
+    specialty_name = (
+        incident.especialidad_detectada.nombre
+        if incident.especialidad_detectada is not None
+        else None
+    )
+    return {
+        "service_id": service.id_servicio,
+        "request_id": request_row.id_solicitud,
+        "incident_id": incident.id_incidente,
+        "workshop_id": request_row.id_taller,
+        "catalog_id": catalog_row.id_catalogo_servicio,
+        "catalog_service_name": catalog_row.nombre,
+        "detected_specialty_id": incident.id_especialidad_detectada,
+        "detected_specialty_name": specialty_name,
+        "severity": incident.severidad,
+        "complexity_source": complexity_source,
+        "history_sample_size": history_sample_size,
+        "complexity_factor": str(complexity_factor),
+        "codigo_precotizacion": service.codigo_precotizacion,
+        "monto_precotizado_min": str(service.monto_precotizado_min),
+        "monto_precotizado_max": str(service.monto_precotizado_max),
+        "incluye_repuestos_basicos": catalog_row.incluye_repuestos_basicos,
+        "currency": PREQUOTATION_CURRENCY,
+    }
+
+
+def _apply_service_prequotation(
+    *,
+    db: Session,
+    incident: Incidente,
+    request_row: SolicitudServicio,
+    service: Servicio,
+    catalog_row: CatalogoServicioTaller | None = None,
+) -> tuple[CatalogoServicioTaller, dict[str, Any]]:
+    if catalog_row is None:
+        catalog_row = _select_catalog_service_for_prequotation(
+            db=db,
+            incident=incident,
+            workshop_id=request_row.id_taller,
+        )
+    complexity_factor, complexity_source, history_sample_size = _estimate_prequotation_complexity(
+        db=db,
+        incident=incident,
+        workshop_id=request_row.id_taller,
+        catalog_row=catalog_row,
+    )
+    prequotation_min = _quantize_currency(catalog_row.precio_base_min * complexity_factor)
+    prequotation_max = _quantize_currency(catalog_row.precio_base_max * complexity_factor)
+    if prequotation_max < prequotation_min:
+        prequotation_max = prequotation_min
+    service.codigo_precotizacion = _generate_prequotation_code(
+        db=db,
+        service_id=service.id_servicio,
+    )
+    service.monto_precotizado_min = prequotation_min
+    service.monto_precotizado_max = prequotation_max
+    service.costo_mano_obra = _quantize_currency((prequotation_min + prequotation_max) / Decimal("2"))
+    payload = _build_prequotation_payload(
+        incident=incident,
+        request_row=request_row,
+        service=service,
+        catalog_row=catalog_row,
+        complexity_source=complexity_source,
+        history_sample_size=history_sample_size,
+        complexity_factor=complexity_factor,
+    )
+    return catalog_row, payload
 
 
 def _build_specialty_summary(specialty: Especialidad | None) -> SpecialtySummaryResponse | None:
@@ -980,6 +1409,288 @@ def get_workshop_profile(
     return _build_workshop_profile_response(taller)
 
 
+def list_workshop_catalog_services(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    include_inactive: bool = False,
+) -> list[WorkshopCatalogServiceResponse]:
+    query = _build_workshop_catalog_query().where(
+        CatalogoServicioTaller.id_taller == admin_context.workshop_id,
+    )
+    if not include_inactive:
+        query = query.where(CatalogoServicioTaller.activo.is_(True))
+    catalog_rows = list(
+        db.scalars(
+            query.order_by(
+                CatalogoServicioTaller.activo.desc(),
+                func.lower(CatalogoServicioTaller.nombre),
+                CatalogoServicioTaller.id_catalogo_servicio.desc(),
+            )
+        )
+    )
+    return [_serialize_workshop_catalog_service(item) for item in catalog_rows]
+
+
+def create_workshop_catalog_service(
+    *,
+    payload: WorkshopCatalogServiceCreateRequest,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> WorkshopCatalogServiceResponse:
+    normalized_name = _normalize_text(payload.nombre)
+    specialty = _ensure_catalog_specialty_exists(
+        db=db,
+        specialty_id=payload.id_especialidad,
+    )
+    _ensure_catalog_duplicate_rules(
+        db=db,
+        workshop_id=admin_context.workshop_id,
+        specialty_id=payload.id_especialidad,
+        normalized_name=normalized_name,
+    )
+
+    catalog_row = CatalogoServicioTaller(
+        id_taller=admin_context.workshop_id,
+        id_especialidad=payload.id_especialidad,
+        nombre=normalized_name,
+        descripcion=_normalize_optional_text(payload.descripcion),
+        precio_base_min=payload.precio_base_min,
+        precio_base_max=payload.precio_base_max,
+        incluye_repuestos_basicos=payload.incluye_repuestos_basicos,
+        activo=True,
+    )
+    catalog_row.especialidad = specialty
+    db.add(catalog_row)
+    db.flush()
+    db.add(
+        _create_workshop_catalog_bitacora_event(
+            admin_context=admin_context,
+            accion="CATALOGO_SERVICIO_TALLER_CREADO",
+            descripcion="El administrador registro un servicio base en el catalogo del taller.",
+            datos_originales=None,
+            datos_nuevos={
+                "workshop_id": admin_context.workshop_id,
+                "catalog_id": catalog_row.id_catalogo_servicio,
+                "id_especialidad": catalog_row.id_especialidad,
+                "nombre": catalog_row.nombre,
+                "precio_base_min": str(catalog_row.precio_base_min),
+                "precio_base_max": str(catalog_row.precio_base_max),
+                "incluye_repuestos_basicos": catalog_row.incluye_repuestos_basicos,
+                "activo": catalog_row.activo,
+            },
+            ip_origen=ip_origen,
+            user_agent=user_agent,
+        )
+    )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Catalog service conflicts with existing workshop data.",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Catalog service could not be created.",
+        ) from exc
+
+    db.expire_all()
+    refreshed = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_row.id_catalogo_servicio,
+        workshop_id=admin_context.workshop_id,
+    )
+    return _serialize_workshop_catalog_service(refreshed)
+
+
+def update_workshop_catalog_service(
+    *,
+    catalog_id: int,
+    payload: WorkshopCatalogServiceUpdateRequest,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> WorkshopCatalogServiceResponse:
+    catalog_row = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_id,
+        workshop_id=admin_context.workshop_id,
+    )
+    previous_payload = {
+        "id_especialidad": catalog_row.id_especialidad,
+        "nombre": catalog_row.nombre,
+        "descripcion": catalog_row.descripcion,
+        "precio_base_min": str(catalog_row.precio_base_min),
+        "precio_base_max": str(catalog_row.precio_base_max),
+        "incluye_repuestos_basicos": catalog_row.incluye_repuestos_basicos,
+        "activo": catalog_row.activo,
+    }
+
+    target_specialty_id = (
+        payload.id_especialidad
+        if payload.id_especialidad is not None
+        else catalog_row.id_especialidad
+    )
+    target_name = (
+        _normalize_text(payload.nombre)
+        if payload.nombre is not None
+        else catalog_row.nombre
+    )
+    target_min = (
+        payload.precio_base_min
+        if payload.precio_base_min is not None
+        else catalog_row.precio_base_min
+    )
+    target_max = (
+        payload.precio_base_max
+        if payload.precio_base_max is not None
+        else catalog_row.precio_base_max
+    )
+    if target_max < target_min:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="precio_base_max must be greater than or equal to precio_base_min.",
+        )
+
+    specialty = _ensure_catalog_specialty_exists(
+        db=db,
+        specialty_id=target_specialty_id,
+    )
+    _ensure_catalog_duplicate_rules(
+        db=db,
+        workshop_id=admin_context.workshop_id,
+        specialty_id=target_specialty_id,
+        normalized_name=target_name,
+        exclude_catalog_id=catalog_row.id_catalogo_servicio,
+    )
+
+    catalog_row.id_especialidad = target_specialty_id
+    catalog_row.nombre = target_name
+    if payload.descripcion is not None:
+        catalog_row.descripcion = _normalize_optional_text(payload.descripcion)
+    catalog_row.precio_base_min = target_min
+    catalog_row.precio_base_max = target_max
+    if payload.incluye_repuestos_basicos is not None:
+        catalog_row.incluye_repuestos_basicos = payload.incluye_repuestos_basicos
+    if payload.activo is not None:
+        catalog_row.activo = payload.activo
+    catalog_row.especialidad = specialty
+
+    db.add(
+        _create_workshop_catalog_bitacora_event(
+            admin_context=admin_context,
+            accion="CATALOGO_SERVICIO_TALLER_ACTUALIZADO",
+            descripcion="El administrador actualizo un servicio del catalogo del taller.",
+            datos_originales=previous_payload,
+            datos_nuevos={
+                "workshop_id": admin_context.workshop_id,
+                "catalog_id": catalog_row.id_catalogo_servicio,
+                "id_especialidad": catalog_row.id_especialidad,
+                "nombre": catalog_row.nombre,
+                "descripcion": catalog_row.descripcion,
+                "precio_base_min": str(catalog_row.precio_base_min),
+                "precio_base_max": str(catalog_row.precio_base_max),
+                "incluye_repuestos_basicos": catalog_row.incluye_repuestos_basicos,
+                "activo": catalog_row.activo,
+            },
+            ip_origen=ip_origen,
+            user_agent=user_agent,
+        )
+    )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Catalog service conflicts with existing workshop data.",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Catalog service could not be updated.",
+        ) from exc
+
+    db.expire_all()
+    refreshed = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_row.id_catalogo_servicio,
+        workshop_id=admin_context.workshop_id,
+    )
+    return _serialize_workshop_catalog_service(refreshed)
+
+
+def deactivate_workshop_catalog_service(
+    *,
+    catalog_id: int,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> WorkshopCatalogServiceResponse:
+    catalog_row = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_id,
+        workshop_id=admin_context.workshop_id,
+    )
+    if not catalog_row.activo:
+        return _serialize_workshop_catalog_service(catalog_row)
+
+    previous_payload = {
+        "activo": catalog_row.activo,
+        "nombre": catalog_row.nombre,
+        "id_especialidad": catalog_row.id_especialidad,
+    }
+    catalog_row.activo = False
+    db.add(
+        _create_workshop_catalog_bitacora_event(
+            admin_context=admin_context,
+            accion="CATALOGO_SERVICIO_TALLER_DESACTIVADO",
+            descripcion="El administrador desactivo un servicio del catalogo del taller.",
+            datos_originales=previous_payload,
+            datos_nuevos={
+                "workshop_id": admin_context.workshop_id,
+                "catalog_id": catalog_row.id_catalogo_servicio,
+                "id_especialidad": catalog_row.id_especialidad,
+                "nombre": catalog_row.nombre,
+                "precio_base_min": str(catalog_row.precio_base_min),
+                "precio_base_max": str(catalog_row.precio_base_max),
+                "incluye_repuestos_basicos": catalog_row.incluye_repuestos_basicos,
+                "activo": catalog_row.activo,
+            },
+            ip_origen=ip_origen,
+            user_agent=user_agent,
+        )
+    )
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Catalog service could not be deactivated.",
+        ) from exc
+
+    db.expire_all()
+    refreshed = _get_workshop_catalog_service(
+        db=db,
+        catalog_id=catalog_row.id_catalogo_servicio,
+        workshop_id=admin_context.workshop_id,
+    )
+    return _serialize_workshop_catalog_service(refreshed)
+
+
 def list_workshop_media_files(
     *,
     admin_context: WorkshopAdminContext,
@@ -1420,7 +2131,9 @@ def _serialize_request_detail(
     request_row: SolicitudServicio,
     *,
     is_expired: bool,
+    db: Session,
 ) -> WorkshopRequestDetailResponse:
+    service = request_row.servicio
     return WorkshopRequestDetailResponse(
         request_id=request_row.id_solicitud,
         request_status=request_row.estado,
@@ -1446,8 +2159,17 @@ def _serialize_request_detail(
         ai_summary=request_row.incidente.diagnostico_ia_resumen,
         transcripcion_audio=request_row.incidente.transcripcion_audio,
         image_labels=request_row.incidente.etiquetas_imagen,
-        service_id=request_row.servicio.id_servicio if request_row.servicio is not None else None,
-        service_state=request_row.servicio.estado if request_row.servicio is not None else None,
+        service_id=service.id_servicio if service is not None else None,
+        service_state=service.estado if service is not None else None,
+        prequotation_code=service.codigo_precotizacion if service is not None else None,
+        prequotation_min=service.monto_precotizado_min if service is not None else None,
+        prequotation_max=service.monto_precotizado_max if service is not None else None,
+        prequotation_currency=(
+            PREQUOTATION_CURRENCY
+            if service is not None and service.codigo_precotizacion is not None
+            else None
+        ),
+        catalog_service_name=_get_catalog_service_name_from_prequotation(db=db, service=service),
         motivo_cierre=request_row.motivo_cierre,
     )
 
@@ -1544,7 +2266,7 @@ def get_workshop_request_detail(
         )
 
     is_expired = request_row.estado == "EXPIRADA"
-    return _serialize_request_detail(request_row, is_expired=is_expired)
+    return _serialize_request_detail(request_row, is_expired=is_expired, db=db)
 
 
 def list_waiting_assignment_services(
@@ -1578,6 +2300,16 @@ def list_waiting_assignment_services(
             ),
             severity=service.solicitud.incidente.severidad,
             ai_summary=service.solicitud.incidente.diagnostico_ia_resumen,
+            prequotation_code=service.codigo_precotizacion,
+            prequotation_min=service.monto_precotizado_min,
+            prequotation_max=service.monto_precotizado_max,
+            prequotation_currency=(
+                PREQUOTATION_CURRENCY if service.codigo_precotizacion is not None else None
+            ),
+            catalog_service_name=_get_catalog_service_name_from_prequotation(
+                db=db,
+                service=service,
+            ),
             assignment_timestamp=service.fecha_asignacion_operario,
         )
         for service in services
@@ -1904,6 +2636,7 @@ def _build_accept_response(
     *,
     request_row: SolicitudServicio,
     service: Servicio,
+    prequotation_payload: dict[str, Any] | None,
     message: str,
 ) -> WorkshopRequestDecisionResponse:
     return WorkshopRequestDecisionResponse(
@@ -1914,6 +2647,18 @@ def _build_accept_response(
         workshop=_build_workshop_summary(request_row),
         service_id=service.id_servicio,
         service_state=service.estado,
+        prequotation_code=service.codigo_precotizacion,
+        prequotation_min=service.monto_precotizado_min,
+        prequotation_max=service.monto_precotizado_max,
+        prequotation_currency=(
+            PREQUOTATION_CURRENCY if service.codigo_precotizacion is not None else None
+        ),
+        catalog_service_name=(
+            str(prequotation_payload.get("catalog_service_name"))
+            if prequotation_payload is not None
+            and prequotation_payload.get("catalog_service_name") is not None
+            else None
+        ),
         message=message,
     )
 
@@ -2124,9 +2869,14 @@ def _accept_workshop_request(
                 select(Servicio).where(Servicio.id_solicitud == request_row.id_solicitud)
             )
         if service is not None:
+            prequotation_payload = _get_latest_prequotation_payload(
+                db=db,
+                service_id=service.id_servicio,
+            )
             return _build_accept_response(
                 request_row=request_row,
                 service=service,
+                prequotation_payload=prequotation_payload,
                 message="Workshop request was already accepted.",
             )
     elif request_row.estado != "PENDIENTE" or not request_row.es_actual:
@@ -2134,6 +2884,13 @@ def _accept_workshop_request(
             status_code=status.HTTP_409_CONFLICT,
             detail="Workshop request is not in a decidable state.",
         )
+
+    _validate_prequotation_prerequisites(request_row.incidente)
+    selected_catalog = _select_catalog_service_for_prequotation(
+        db=db,
+        incident=request_row.incidente,
+        workshop_id=request_row.id_taller,
+    )
 
     client_user = _get_client_user(db, cliente_id=request_row.incidente.id_cliente)
     now = utc_now()
@@ -2157,6 +2914,14 @@ def _accept_workshop_request(
         db.flush()
         created_service = True
 
+    _, prequotation_payload = _apply_service_prequotation(
+        db=db,
+        incident=request_row.incidente,
+        request_row=request_row,
+        service=service,
+        catalog_row=selected_catalog,
+    )
+
     db.add(
         _create_bitacora_event(
             admin_user=admin_context.user,
@@ -2171,6 +2936,17 @@ def _accept_workshop_request(
             ip_origen=ip_origen,
             user_agent=user_agent,
             id_servicio=service.id_servicio,
+        )
+    )
+    db.add(
+        _create_prequotation_bitacora_event(
+            admin_context=admin_context,
+            incident=request_row.incidente,
+            request_row=request_row,
+            service=service,
+            payload=prequotation_payload,
+            ip_origen=ip_origen,
+            user_agent=user_agent,
         )
     )
     if created_service:
@@ -2198,13 +2974,20 @@ def _accept_workshop_request(
         title="Solicitud aceptada",
         message=(
             f"El taller {request_row.taller.nombre_comercial} acepto tu solicitud. "
-            "El servicio quedo en espera de asignacion de operario."
+            "El servicio quedo en espera de asignacion de operario. "
+            "La precotizacion es referencial antes del diagnostico fisico."
         ),
         payload={
             "incident_id": request_row.id_incidente,
             "request_id": request_row.id_solicitud,
             "service_id": service.id_servicio,
             "service_state": service.estado,
+            "codigo_precotizacion": service.codigo_precotizacion,
+            "monto_precotizado_min": str(service.monto_precotizado_min),
+            "monto_precotizado_max": str(service.monto_precotizado_max),
+            "currency": PREQUOTATION_CURRENCY,
+            "catalog_service_name": selected_catalog.nombre,
+            "incluye_repuestos_basicos": selected_catalog.incluye_repuestos_basicos,
         },
         service_id=service.id_servicio,
     )
@@ -2242,6 +3025,10 @@ def _accept_workshop_request(
     return _build_accept_response(
         request_row=refreshed_request,
         service=refreshed_service,
+        prequotation_payload=_get_latest_prequotation_payload(
+            db=db,
+            service_id=refreshed_service.id_servicio,
+        ),
         message="Workshop request accepted and service created.",
     )
 

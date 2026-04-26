@@ -20,6 +20,9 @@ from .schemas import (
     RepairReportSnapshotResponse,
     UsedSparePartResponse,
     WaitingAssignmentServiceSummary,
+    WorkshopCatalogServiceCreateRequest,
+    WorkshopCatalogServiceResponse,
+    WorkshopCatalogServiceUpdateRequest,
     WorkshopRequestDecisionRequest,
     WorkshopRequestDecisionResponse,
     WorkshopRequestDetailResponse,
@@ -34,11 +37,14 @@ from .schemas import (
 )
 from .service import (
     assign_operario_to_service,
+    create_workshop_catalog_service,
     decide_workshop_request,
+    deactivate_workshop_catalog_service,
     get_operario_candidates_for_service,
     get_repair_report_snapshot,
     get_workshop_profile,
     get_workshop_request_detail,
+    list_workshop_catalog_services,
     list_workshop_media_files,
     list_workshop_staff,
     list_waiting_assignment_services,
@@ -47,6 +53,7 @@ from .service import (
     register_workshop_operario,
     save_repair_report,
     upload_workshop_media_file,
+    update_workshop_catalog_service,
     update_workshop_profile,
     update_workshop_operario_availability,
 )
@@ -72,6 +79,69 @@ def workshop_profile_update(
 ) -> WorkshopProfileResponse:
     return update_workshop_profile(
         payload=payload,
+        admin_context=admin_context,
+        db=db,
+        ip_origen=request.client.host if request.client is not None else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.get("/catalog", response_model=list[WorkshopCatalogServiceResponse])
+def workshop_catalog_list(
+    include_inactive: bool = False,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> list[WorkshopCatalogServiceResponse]:
+    return list_workshop_catalog_services(
+        include_inactive=include_inactive,
+        admin_context=admin_context,
+        db=db,
+    )
+
+
+@router.post("/catalog", response_model=WorkshopCatalogServiceResponse)
+def workshop_catalog_create(
+    request: Request,
+    payload: WorkshopCatalogServiceCreateRequest,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> WorkshopCatalogServiceResponse:
+    return create_workshop_catalog_service(
+        payload=payload,
+        admin_context=admin_context,
+        db=db,
+        ip_origen=request.client.host if request.client is not None else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.put("/catalog/{catalog_id}", response_model=WorkshopCatalogServiceResponse)
+def workshop_catalog_update(
+    request: Request,
+    catalog_id: int,
+    payload: WorkshopCatalogServiceUpdateRequest,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> WorkshopCatalogServiceResponse:
+    return update_workshop_catalog_service(
+        catalog_id=catalog_id,
+        payload=payload,
+        admin_context=admin_context,
+        db=db,
+        ip_origen=request.client.host if request.client is not None else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.patch("/catalog/{catalog_id}/deactivate", response_model=WorkshopCatalogServiceResponse)
+def workshop_catalog_deactivate(
+    request: Request,
+    catalog_id: int,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> WorkshopCatalogServiceResponse:
+    return deactivate_workshop_catalog_service(
+        catalog_id=catalog_id,
         admin_context=admin_context,
         db=db,
         ip_origen=request.client.host if request.client is not None else None,

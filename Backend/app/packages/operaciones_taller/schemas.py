@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from app.core.config import settings
+
 
 class _NormalizedModel(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -61,6 +63,11 @@ class WorkshopRequestDetailResponse(BaseModel):
     image_labels: list[str] | dict[str, object] | None = None
     service_id: int | None = None
     service_state: str | None = None
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
+    catalog_service_name: str | None = None
     motivo_cierre: str | None = None
 
 
@@ -91,6 +98,11 @@ class WorkshopRequestDecisionResponse(BaseModel):
     workshop: WorkshopSummaryResponse
     service_id: int | None = None
     service_state: str | None = None
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
+    catalog_service_name: str | None = None
     next_request_id: int | None = None
     no_candidate_after_rejection: bool = False
     next_selected_workshop: WorkshopSummaryResponse | None = None
@@ -107,6 +119,11 @@ class WaitingAssignmentServiceSummary(BaseModel):
     detected_specialty: SpecialtySummaryResponse | None = None
     severity: str | None = None
     ai_summary: str | None = None
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
+    catalog_service_name: str | None = None
     assignment_timestamp: datetime | None = None
 
 
@@ -253,6 +270,83 @@ class WorkshopConfiguredSpecialtyResponse(BaseModel):
     activo: bool
 
 
+class WorkshopCatalogServiceCreateRequest(_NormalizedModel):
+    id_especialidad: int = Field(gt=0)
+    nombre: str = Field(min_length=1, max_length=120)
+    descripcion: str | None = Field(default=None, max_length=5000)
+    precio_base_min: Decimal = Field(ge=0)
+    precio_base_max: Decimal = Field(ge=0)
+    incluye_repuestos_basicos: bool
+
+    @field_validator("nombre")
+    @classmethod
+    def normalize_nombre(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("nombre must not be empty.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_price_range(self) -> "WorkshopCatalogServiceCreateRequest":
+        if self.precio_base_max < self.precio_base_min:
+            raise ValueError("precio_base_max must be greater than or equal to precio_base_min.")
+        return self
+
+
+class WorkshopCatalogServiceUpdateRequest(_NormalizedModel):
+    id_especialidad: int | None = Field(default=None, gt=0)
+    nombre: str | None = Field(default=None, min_length=1, max_length=120)
+    descripcion: str | None = Field(default=None, max_length=5000)
+    precio_base_min: Decimal | None = Field(default=None, ge=0)
+    precio_base_max: Decimal | None = Field(default=None, ge=0)
+    incluye_repuestos_basicos: bool | None = None
+    activo: bool | None = None
+
+    @field_validator("nombre")
+    @classmethod
+    def normalize_optional_nombre(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("nombre must not be empty.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_update_payload(self) -> "WorkshopCatalogServiceUpdateRequest":
+        meaningful_values = (
+            self.id_especialidad,
+            self.nombre,
+            self.descripcion,
+            self.precio_base_min,
+            self.precio_base_max,
+            self.incluye_repuestos_basicos,
+            self.activo,
+        )
+        if all(value is None for value in meaningful_values):
+            raise ValueError("At least one field must be provided for update.")
+        if (
+            self.precio_base_min is not None
+            and self.precio_base_max is not None
+            and self.precio_base_max < self.precio_base_min
+        ):
+            raise ValueError("precio_base_max must be greater than or equal to precio_base_min.")
+        return self
+
+
+class WorkshopCatalogServiceResponse(BaseModel):
+    catalog_id: int
+    workshop_id: int
+    id_especialidad: int
+    especialidad_nombre: str
+    nombre: str
+    descripcion: str | None = None
+    precio_base_min: Decimal
+    precio_base_max: Decimal
+    incluye_repuestos_basicos: bool
+    activo: bool
+
+
 class WorkshopMediaFileResponse(BaseModel):
     id_taller_archivo: int
     tipo_archivo: str
@@ -287,6 +381,13 @@ class WorkshopProfileUpdateRequest(_NormalizedModel):
     radio_accion_km: Decimal = Field(gt=0)
     specialty_ids: list[int] = Field(min_length=1)
     acepta_seguro_propio: bool | None = None
+
+    @field_validator("radio_accion_km")
+    @classmethod
+    def validate_radio_accion_km_platform_limit(cls, value: Decimal) -> Decimal:
+        if value > Decimal(str(settings.workshop_max_action_radius_km)):
+            raise ValueError("radio_accion_km exceeds the platform maximum allowed radius.")
+        return value
 
 
 class WorkshopMediaUploadRequest(_NormalizedModel):
