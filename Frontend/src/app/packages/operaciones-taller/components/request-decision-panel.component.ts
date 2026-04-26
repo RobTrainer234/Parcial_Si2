@@ -169,6 +169,5 @@ export class RequestDecisionPanelComponent {
 
     this.validationMessage.set('');
     this.confirmReject.emit(trimmed);
-    this.reason.set('');
   }
 }

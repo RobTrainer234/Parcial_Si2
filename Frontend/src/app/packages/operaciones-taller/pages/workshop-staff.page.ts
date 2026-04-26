@@ -717,19 +717,34 @@ export class WorkshopStaffPage {
     }
 
     const rawValue = this.registerForm.getRawValue();
-    const specialties = this.specialtyControls()
-      .filter((group) => Boolean(group.get('selected')?.value))
-      .map((group): StaffSpecialtyInput => {
-        const id_especialidad = Number(group.get('id_especialidad')?.value);
-        return {
-          id_especialidad: id_especialidad || 0,
-          anios_experiencia: Number(group.get('anios_experiencia')?.value ?? 0),
-          certificacion_url: this.normalizeOptionalText(
-            group.get('certificacion_url')?.value as string | null | undefined,
-          ),
-        };
-      })
-      .filter(s => s.id_especialidad > 0 && s.anios_experiencia >= 0);
+    const specialties: StaffSpecialtyInput[] = [];
+
+    for (const group of this.specialtyControls()) {
+      if (!group.get('selected')?.value) {
+        continue;
+      }
+
+      const id_especialidad = Number(group.get('id_especialidad')?.value);
+      const anios_experiencia = Number(group.get('anios_experiencia')?.value ?? 0);
+
+      if (!Number.isInteger(id_especialidad) || id_especialidad <= 0) {
+        this.formError.set('ID de especialidad inválido detectado.');
+        return;
+      }
+
+      if (!Number.isFinite(anios_experiencia) || anios_experiencia < 0) {
+        this.formError.set('Años de experiencia inválidos detectados.');
+        return;
+      }
+
+      specialties.push({
+        id_especialidad,
+        anios_experiencia,
+        certificacion_url: this.normalizeOptionalText(
+          group.get('certificacion_url')?.value as string | null | undefined,
+        ),
+      });
+    }
 
     if (specialties.length === 0) {
       this.formError.set('Selecciona al menos una especialidad válida.');
