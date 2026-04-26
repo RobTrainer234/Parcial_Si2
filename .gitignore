@@ -1,0 +1,66 @@
+﻿# =========================
+# DEPENDENCIAS
+# =========================
+node_modules/
+**/node_modules/
+
+# =========================
+# ANGULAR / FRONTEND
+# =========================
+Frontend/dist/
+Frontend/.angular/
+Frontend/.cache/
+
+# =========================
+# PYTHON / FASTAPI
+# =========================
+Backend/venv/
+Backend/.venv/
+Backend/env/
+Backend/__pycache__/
+Backend/**/*.pyc
+Backend/.pytest_cache/
+
+# =========================
+# VARIABLES SECRETAS
+# NO SUBIR JAMAS
+# =========================
+.env
+.env.*
+Backend/.env
+Backend/.env.*
+Frontend/.env
+Frontend/.env.*
+
+# =========================
+# LOGS
+# =========================
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# =========================
+# EDITORES / SISTEMA
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# CACHE GENERAL
+# =========================
+__pycache__/
+.pytest_cache/
+
+# =========================
+# ARCHIVOS SUBIDOS / GENERADOS POR EL SISTEMA
+# =========================
+Backend/media/
+
+# =========================
+# PERMITIR ARCHIVOS DE EJEMPLO DE VARIABLES
+# =========================
+!.env.example
+!**/.env.example
