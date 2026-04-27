@@ -25,22 +25,10 @@ import { ThemeService } from '../../../core/theme/theme.service';
       <section class="login-card">
         <div class="login-card__brand">
           <p class="login-card__eyebrow">SI2 Auxilio</p>
-          <h1>Workshop Admin Panel</h1>
+          <h1>Sistema de Taller</h1>
           <p class="login-card__subtitle">
-            Controla solicitudes, asignaciones, auditoría y desempeño del taller desde una
-            sola consola operativa.
+            Accede al panel para gestionar solicitudes, operarios, servicios y seguimiento del taller.
           </p>
-
-          <div class="login-card__highlights">
-            <div>
-              <span>Backend</span>
-              <strong>FastAPI en línea</strong>
-            </div>
-            <div>
-              <span>Acceso</span>
-              <strong>Solo administradores</strong>
-            </div>
-          </div>
         </div>
 
         <form [formGroup]="form" (ngSubmit)="submit()" class="login-card__form">
@@ -168,32 +156,6 @@ import { ThemeService } from '../../../core/theme/theme.service';
         max-width: 38ch;
       }
 
-      .login-card__highlights {
-        display: grid;
-        gap: var(--space-4);
-        margin-top: var(--space-8);
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .login-card__highlights div {
-        padding: var(--space-4);
-        border-radius: var(--radius-lg);
-        background: color-mix(in srgb, var(--color-bg) 18%, var(--color-surface));
-        border: 1px solid var(--color-border);
-      }
-
-      .login-card__highlights span {
-        display: block;
-        color: var(--color-text-soft);
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.14em;
-      }
-
-      .login-card__highlights strong {
-        display: block;
-        margin-top: var(--space-2);
-      }
 
       .login-card__form {
         display: flex;
@@ -225,10 +187,6 @@ import { ThemeService } from '../../../core/theme/theme.service';
 
         .login-card::after {
           display: none;
-        }
-
-        .login-card__highlights {
-          grid-template-columns: 1fr;
         }
       }
 
@@ -282,10 +240,10 @@ export class AdminLoginPage {
     } catch (error) {
       const backendMessage =
         error instanceof HttpErrorResponse
-          ? error.error?.detail ?? 'No se pudo autenticar con el backend.'
+          ? error.error?.detail ?? 'No se pudo iniciar sesión. Verifica tus credenciales.'
           : error instanceof Error
             ? error.message
-            : 'No se pudo autenticar con el backend.';
+            : 'No se pudo iniciar sesión. Verifica tus credenciales.';
 
       this.errorMessage.set(String(backendMessage));
     } finally {

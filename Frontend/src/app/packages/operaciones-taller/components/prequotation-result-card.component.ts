@@ -13,7 +13,7 @@ import { PrequotationDecisionResult } from '../data-access/workshop-request.mode
   template: `
     <app-card
       title="Resultado de aceptación"
-      subtitle="La solicitud fue aceptada y el backend devolvió el estado operativo actual."
+      subtitle="La solicitud fue aceptada exitosamente."
     >
       <div class="result-grid">
         @if (result().service_id) {

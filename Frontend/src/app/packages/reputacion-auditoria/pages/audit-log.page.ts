@@ -43,8 +43,8 @@ import {
   ],
   template: `
     <app-page-header
-      title="Auditoría y trazabilidad"
-      subtitle="Consulta eventos críticos, cambios de estado y evidencias operativas del taller."
+      title="Auditoria y trazabilidad"
+      subtitle="Consulta eventos criticos, cambios de estado y evidencias operativas del taller."
     >
       <div page-actions>
         <button
@@ -96,10 +96,10 @@ import {
     }
 
     @if (loading()) {
-      <app-loading-state message="Cargando registros de auditoría..."></app-loading-state>
+      <app-loading-state message="Cargando registros de auditoria..."></app-loading-state>
     } @else if (logs().length === 0) {
       <div>
-        <app-empty-state message="No se encontraron registros de auditoría."></app-empty-state>
+        <app-empty-state message="No se encontraron registros de auditoria."></app-empty-state>
         @if (hasActiveFilters()) {
           <div class="mt-3">
             <button type="button" class="app-button app-button--sm" (click)="applyFilters({})">
@@ -110,7 +110,11 @@ import {
       </div>
     } @else {
       <div class="summary-counters mb-4 mt-4">
-        <span class="badge badge--info">Total registros: {{ logs().length }}</span>
+        <span class="badge badge--info">Total visibles: {{ total() }}</span>
+        <span class="badge badge--neutral">Cargados: {{ logs().length }}</span>
+        @if (hasNext()) {
+          <span class="badge badge--warning">Hay mas registros disponibles</span>
+        }
       </div>
 
       <app-card>
@@ -119,9 +123,9 @@ import {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Fecha y Hora</th>
+                <th>Fecha y hora</th>
                 <th>Actor</th>
-                <th>Acción</th>
+                <th>Accion</th>
                 <th>Evento</th>
                 <th>Entidad</th>
                 <th>Entidad ID</th>
@@ -133,11 +137,11 @@ import {
                 <tr>
                   <td>#{{ log.audit_id }}</td>
                   <td>{{ formatDate(log.timestamp) }}</td>
-                  <td>{{ log.actor || log.usuario || 'Sistema' }}</td>
+                  <td>{{ actorLabel(log) }}</td>
                   <td><app-status-badge [label]="log.action" /></td>
                   <td>{{ log.event_type }}</td>
-                  <td>{{ log.entity_type }}</td>
-                  <td>{{ log.entity_id || '-' }}</td>
+                  <td>{{ log.main_entity }}</td>
+                  <td>{{ log.main_entity_id ?? '-' }}</td>
                   <td>
                     <div class="table-actions">
                       <button
@@ -148,10 +152,10 @@ import {
                       >
                         {{ loadingDetailId() === log.audit_id ? 'Cargando...' : 'Ver detalle' }}
                       </button>
-                      @if (log.service_id) {
+                      @if (log.linked.service_id) {
                         <a
                           class="app-button app-button--ghost app-button--sm"
-                          [routerLink]="['/admin/services', log.service_id, 'timeline']"
+                          [routerLink]="['/admin/services', log.linked.service_id, 'timeline']"
                         >
                           Ver timeline
                         </a>
@@ -202,10 +206,14 @@ import {
         align-items: center;
       }
 
+      .badge--info { background: var(--color-primary); color: #fff; }
+      .badge--warning { background: var(--color-warning); color: #fff; }
+      .badge--neutral { background: var(--color-surface-soft); border: 1px solid var(--color-border); }
+
       .mb-4 {
         margin-bottom: var(--space-4);
       }
-      
+
       .mt-4 {
         margin-top: var(--space-4);
       }
@@ -223,12 +231,14 @@ export class AuditLogPage {
   protected readonly loading = signal(true);
   protected readonly exporting = signal(false);
   protected readonly pageError = signal('');
-  
   protected readonly isFiltersVisible = signal(false);
   protected readonly currentFilters = signal<AuditLogFilters>({});
   protected readonly filterOptions = signal<AuditFilterOptions | null>(null);
-  
   protected readonly logs = signal<AuditLogSummary[]>([]);
+  protected readonly total = signal(0);
+  protected readonly limit = signal(50);
+  protected readonly offset = signal(0);
+  protected readonly hasNext = signal(false);
   protected readonly selectedDetail = signal<AuditLogDetail | null>(null);
   protected readonly loadingDetailId = signal<number | null>(null);
 
@@ -246,11 +256,15 @@ export class AuditLogPage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.logs.set(response);
+          this.logs.set(response.items);
+          this.total.set(response.total);
+          this.limit.set(response.limit);
+          this.offset.set(response.offset);
+          this.hasNext.set(response.has_next);
           this.loading.set(false);
         },
         error: () => {
-          this.pageError.set('No se pudieron cargar los registros de auditoría.');
+          this.pageError.set('No se pudieron cargar los registros de auditoria.');
           this.loading.set(false);
         },
       });
@@ -262,12 +276,12 @@ export class AuditLogPage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (options) => this.filterOptions.set(options),
-        error: () => console.warn('Failed to load filter options'),
+        error: () => console.warn('Failed to load audit filter options.'),
       });
   }
 
   protected toggleFilters(): void {
-    this.isFiltersVisible.update((v) => !v);
+    this.isFiltersVisible.update((value) => !value);
   }
 
   protected applyFilters(filters: AuditLogFilters): void {
@@ -287,7 +301,7 @@ export class AuditLogPage {
     }
 
     if (!Number.isInteger(auditId) || auditId <= 0) {
-      this.pageError.set('ID de auditoría inválido.');
+      this.pageError.set('ID de auditoria invalido.');
       return;
     }
 
@@ -303,7 +317,7 @@ export class AuditLogPage {
           this.loadingDetailId.set(null);
         },
         error: () => {
-          this.pageError.set('No se pudo cargar el detalle de la auditoría.');
+          this.pageError.set('No se pudo cargar el detalle de la auditoria.');
           this.loadingDetailId.set(null);
         },
       });
@@ -327,20 +341,33 @@ export class AuditLogPage {
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `audit_logs_taller_${new Date().toISOString().split('T')[0]}.csv`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `audit_logs_taller_${new Date().toISOString().split('T')[0]}.csv`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
           window.URL.revokeObjectURL(url);
           this.exporting.set(false);
         },
         error: () => {
-          this.pageError.set('No se pudo exportar el CSV de auditoría.');
+          this.pageError.set('No se pudo exportar el CSV de auditoria.');
           this.exporting.set(false);
         },
       });
+  }
+
+  protected actorLabel(log: AuditLogSummary): string {
+    if (log.actor?.email) {
+      return log.actor.email;
+    }
+    if (log.actor?.tipo_usuario && log.actor?.user_id) {
+      return `${log.actor.tipo_usuario} #${log.actor.user_id}`;
+    }
+    if (log.actor?.user_id) {
+      return `Usuario #${log.actor.user_id}`;
+    }
+    return 'Sistema';
   }
 
   protected formatDate(value: string): string {

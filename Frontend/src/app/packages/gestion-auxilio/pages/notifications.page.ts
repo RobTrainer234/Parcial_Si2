@@ -15,7 +15,6 @@ import { EmptyStateComponent } from '../../../shared/components/empty-state.comp
 import { ErrorStateComponent } from '../../../shared/components/error-state.component';
 import { LoadingStateComponent } from '../../../shared/components/loading-state.component';
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
-import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
 import { NotificationDetailPanelComponent } from '../components/notification-detail-panel.component';
 import { NotificationFilterPanelComponent } from '../components/notification-filter-panel.component';
 import { NotificationsPageApi } from '../data-access/notifications.api';
@@ -43,7 +42,7 @@ import {
   template: `
     <app-page-header
       title="Notificaciones"
-      subtitle="Consulta alertas operativas, avisos del sistema y eventos que requieren atención del taller."
+      subtitle="Consulta alertas operativas, avisos del sistema y eventos que requieren atencion del taller."
     >
       <div page-actions>
         <button
@@ -61,16 +60,6 @@ import {
         >
           Actualizar
         </button>
-        @if (hasUnread) {
-          <button
-            type="button"
-            class="app-button"
-            (click)="markAllAsRead()"
-            [disabled]="processingAll()"
-          >
-            {{ processingAll() ? 'Procesando...' : 'Marcar todas como leídas' }}
-          </button>
-        }
       </div>
     </app-page-header>
 
@@ -112,7 +101,7 @@ import {
       <div class="summary-counters mb-4 mt-4">
         <span class="badge badge--info">Total cargadas: {{ notifications().length }}</span>
         @if (unreadCount > 0) {
-          <span class="badge badge--warning">No leídas: {{ unreadCount }}</span>
+          <span class="badge badge--warning">No leidas: {{ unreadCount }}</span>
         }
       </div>
 
@@ -124,8 +113,8 @@ import {
                 <th style="width: 50px;"></th>
                 <th>Fecha y Hora</th>
                 <th>Prioridad</th>
-                <th>Título</th>
-                <th>Tipo</th>
+                <th>Titulo</th>
+                <th>Canal</th>
                 <th>Referencia</th>
                 <th>Acciones</th>
               </tr>
@@ -135,7 +124,7 @@ import {
                 <tr [class.is-unread]="!(notif.read || notif.leida)">
                   <td class="status-indicator">
                     @if (!(notif.read || notif.leida)) {
-                      <span class="unread-dot" title="No leída"></span>
+                      <span class="unread-dot" title="No leida"></span>
                     }
                   </td>
                   <td>{{ formatDate(notif.created_at || notif.fecha_creacion) }}</td>
@@ -145,7 +134,7 @@ import {
                     </span>
                   </td>
                   <td class="font-medium">{{ notif.title || notif.titulo }}</td>
-                  <td>{{ notif.type || notif.tipo }}</td>
+                  <td>{{ notif.type || notif.tipo || '-' }}</td>
                   <td>{{ getReferenceLabel(notif) }}</td>
                   <td>
                     <div class="table-actions">
@@ -153,9 +142,9 @@ import {
                         type="button"
                         class="app-button app-button--ghost app-button--sm"
                         (click)="viewDetail(notif)"
-                        [disabled]="!notificationId(notif) || loadingDetailId() === notificationId(notif)"
+                        [disabled]="!notificationId(notif)"
                       >
-                        {{ loadingDetailId() === notificationId(notif) ? 'Cargando...' : 'Ver detalle' }}
+                        Ver detalle
                       </button>
 
                       @if (!(notif.read || notif.leida) && notificationId(notif)) {
@@ -165,7 +154,7 @@ import {
                           (click)="markAsRead(notificationId(notif)!)"
                           [disabled]="processingIds().has(notificationId(notif)!)"
                         >
-                          Marcar leída
+                          Marcar leida
                         </button>
                       }
 
@@ -216,7 +205,7 @@ import {
       .app-table tbody tr.is-unread {
         background: color-mix(in srgb, var(--color-surface-soft) 40%, transparent);
       }
-      
+
       .app-table tbody tr:hover {
         background: color-mix(in srgb, var(--color-surface-soft) 80%, transparent);
       }
@@ -261,22 +250,14 @@ export class NotificationsPage {
 
   protected readonly loading = signal(true);
   protected readonly pageError = signal('');
-  protected readonly processingAll = signal(false);
   protected readonly processingIds = signal<Set<number>>(new Set());
-  
   protected readonly isFiltersVisible = signal(false);
   protected readonly currentFilters = signal<NotificationFilters>({});
-  
   protected readonly notifications = signal<NotificationSummary[]>([]);
   protected readonly selectedDetail = signal<NotificationDetail | null>(null);
-  protected readonly loadingDetailId = signal<number | null>(null);
 
   protected get unreadCount(): number {
-    return this.notifications().filter(n => !(n.read || n.leida)).length;
-  }
-
-  protected get hasUnread(): boolean {
-    return this.unreadCount > 0;
+    return this.notifications().filter((n) => !(n.read || n.leida)).length;
   }
 
   private isPositiveInteger(value: unknown): value is number {
@@ -329,32 +310,13 @@ export class NotificationsPage {
 
   protected viewDetail(notif: NotificationSummary): void {
     const id = this.notificationId(notif);
-    if (!id || this.loadingDetailId()) {
-      return;
-    }
-
-    if (!Number.isInteger(id) || id <= 0) {
-      this.pageError.set('ID de notificación inválido.');
+    if (!id) {
+      this.pageError.set('ID de notificacion invalido.');
       return;
     }
 
     this.pageError.set('');
-    this.loadingDetailId.set(id);
-
-    this.api
-      .getNotificationDetail(id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (detail) => {
-          this.selectedDetail.set(detail);
-          this.loadingDetailId.set(null);
-        },
-        error: () => {
-          // If no specific endpoint exists, fallback to list item representation
-          this.selectedDetail.set({ ...notif } as NotificationDetail);
-          this.loadingDetailId.set(null);
-        },
-      });
+    this.selectedDetail.set({ ...notif } as NotificationDetail);
   }
 
   protected closeDetail(): void {
@@ -362,13 +324,15 @@ export class NotificationsPage {
   }
 
   protected markAsRead(id: number): void {
-    if (!this.isPositiveInteger(id)) return;
+    if (!this.isPositiveInteger(id)) {
+      return;
+    }
 
     this.pageError.set('');
-    this.processingIds.update(set => {
-      const newSet = new Set(set);
-      newSet.add(id);
-      return newSet;
+    this.processingIds.update((set) => {
+      const next = new Set(set);
+      next.add(id);
+      return next;
     });
 
     this.api
@@ -376,59 +340,42 @@ export class NotificationsPage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.notifications.update(list => 
-            list.map(n => 
-              (this.notificationId(n) === id) 
-                ? { ...n, read: true, leida: true } 
-                : n
-            )
+          this.notifications.update((list) =>
+            list.map((item) =>
+              this.notificationId(item) === id
+                ? { ...item, read: true, leida: true }
+                : item,
+            ),
           );
-          this.processingIds.update(set => {
-            const newSet = new Set(set);
-            newSet.delete(id);
-            return newSet;
+          this.processingIds.update((set) => {
+            const next = new Set(set);
+            next.delete(id);
+            return next;
           });
           this.coreApi.triggerUnreadCountRefresh();
         },
         error: () => {
-          this.pageError.set('No se pudo marcar la notificación como leída.');
-          this.processingIds.update(set => {
-            const newSet = new Set(set);
-            newSet.delete(id);
-            return newSet;
+          this.pageError.set('No se pudo marcar la notificacion como leida.');
+          this.processingIds.update((set) => {
+            const next = new Set(set);
+            next.delete(id);
+            return next;
           });
-        },
-      });
-  }
-
-  protected markAllAsRead(): void {
-    if (!confirm('¿Marcar todas las notificaciones como leídas?')) {
-      return;
-    }
-
-    this.processingAll.set(true);
-    this.pageError.set('');
-
-    this.api
-      .markAllAsRead()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.loadNotifications();
-          this.processingAll.set(false);
-        },
-        error: () => {
-          this.pageError.set('No se pudieron marcar todas como leídas. Es posible que el servidor no soporte esta operación.');
-          this.processingAll.set(false);
         },
       });
   }
 
   protected getPriorityClass(priority: string | null | undefined): string {
-    const p = (priority || '').toUpperCase();
-    if (p === 'CRITICAL' || p === 'CRITICA' || p === 'ALTA' || p === 'HIGH') return 'badge--danger';
-    if (p === 'MEDIUM' || p === 'MEDIA') return 'badge--warning';
-    if (p === 'LOW' || p === 'BAJA' || p === 'INFO') return 'badge--info';
+    const value = (priority || '').toUpperCase();
+    if (value === 'CRITICAL' || value === 'CRITICA' || value === 'ALTA' || value === 'HIGH') {
+      return 'badge--danger';
+    }
+    if (value === 'MEDIUM' || value === 'MEDIA') {
+      return 'badge--warning';
+    }
+    if (value === 'LOW' || value === 'BAJA' || value === 'INFO') {
+      return 'badge--info';
+    }
     return 'badge--neutral';
   }
 
@@ -436,7 +383,7 @@ export class NotificationsPage {
     if (notif.request_id) return `Solicitud #${notif.request_id}`;
     if (notif.service_id) return `Servicio #${notif.service_id}`;
     if (notif.incident_id) return `Incidente #${notif.incident_id}`;
-    if (notif.audit_id) return `Auditoría #${notif.audit_id}`;
+    if (notif.audit_id) return `Auditoria #${notif.audit_id}`;
     if (notif.payment_id) return `Pago #${notif.payment_id}`;
     return '-';
   }

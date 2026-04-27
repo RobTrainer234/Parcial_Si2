@@ -61,7 +61,7 @@ import {
       </app-page-header>
 
       @if (successMessage()) {
-        <app-card title="Asignacion registrada" subtitle="El backend confirmo la asignacion del operario.">
+        <app-card title="Asignación registrada" subtitle="La asignación del operario fue confirmada.">
           <p class="feedback feedback--success">{{ successMessage() }}</p>
           @if (lastAssignment()) {
             <div class="assignment-result">

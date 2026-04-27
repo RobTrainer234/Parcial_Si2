@@ -54,5 +54,5 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 })
 export class LoadingStateComponent {
   readonly title = input<string>('Cargando');
-  readonly message = input<string>('Consultando información del backend.');
+  readonly message = input<string>('Consultando información del sistema.');
 }

@@ -87,7 +87,7 @@ def ensure_user_login_allowed(user: Usuario) -> Usuario:
 
 def ensure_profile_access_allowed(user: Usuario) -> Usuario:
     ensure_user_login_allowed(user)
-    if user.tipo_usuario not in {"CLIENTE", "OPERARIO"}:
+    if user.tipo_usuario not in {"CLIENTE", "OPERARIO", "ADMINISTRADOR"}:
         raise forbidden_user_error("This profile endpoint is not available for the current role.")
 
     persona = user.persona
@@ -95,6 +95,10 @@ def ensure_profile_access_allowed(user: Usuario) -> Usuario:
         raise forbidden_user_error("Client profile is not provisioned.")
     if user.tipo_usuario == "OPERARIO" and (persona is None or persona.operario is None):
         raise forbidden_user_error("Operario profile is not provisioned.")
+    if user.tipo_usuario == "ADMINISTRADOR" and (
+        persona is None or persona.administrador is None or persona.administrador.taller is None
+    ):
+        raise forbidden_user_error("Administrator profile is not provisioned.")
 
     return user
 

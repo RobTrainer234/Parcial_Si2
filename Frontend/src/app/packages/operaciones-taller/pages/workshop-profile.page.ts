@@ -123,7 +123,7 @@ import {
                   <div>
                     <h4>Editar perfil</h4>
                     <p class="text-muted">
-                      Actualiza solo los campos operativos compatibles con el backend actual.
+                      Actualiza la información operativa del taller.
                     </p>
                   </div>
                 </div>
@@ -282,7 +282,7 @@ import {
 
         <app-card
           title="Especialidades técnicas"
-          subtitle="Especialidades activas que el backend usa para matching, catálogo y cobertura."
+          subtitle="Especialidades activas del taller."
         >
           @if (data.specialties.length) {
             <div class="specialties">

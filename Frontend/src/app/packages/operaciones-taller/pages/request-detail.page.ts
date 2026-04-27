@@ -216,7 +216,7 @@ type DecisionConflictAction = 'catalog' | null;
           <div class="detail-layout__side">
             <app-card
               title="Decision administrativa"
-              subtitle="Acepta o rechaza la solicitud usando el flujo real del backend."
+              subtitle="Acepta o rechaza la solicitud de auxilio."
             >
               <div class="decision-actions">
                 <button
@@ -275,7 +275,7 @@ type DecisionConflictAction = 'catalog' | null;
       } @else {
         <app-empty-state
           title="Solicitud no disponible"
-          message="No se recibio informacion util del backend para esta solicitud."
+          message="No se encontró información para esta solicitud."
         />
       }
     </div>

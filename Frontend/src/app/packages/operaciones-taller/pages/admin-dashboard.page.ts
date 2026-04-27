@@ -35,7 +35,7 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
       <app-page-header
         eyebrow="Centro de control"
         title="Dashboard del taller"
-        subtitle="Visibilidad rápida del estado operativo, financiero y de servicio del taller conectado al backend real."
+        subtitle="Visibilidad rápida del estado operativo, financiero y de servicio del taller."
       >
         <button page-actions type="button" class="app-button app-button--secondary" (click)="reload()" [disabled]="loading()">
           {{ loading() ? 'Actualizando...' : 'Actualizar panel' }}
@@ -45,7 +45,7 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
       @if (loading() && !overview()) {
         <app-loading-state
           title="Cargando tablero"
-          message="Consultando KPIs y métricas del taller desde la API."
+          message="Consultando KPIs y métricas del taller."
         />
       } @else if (error()) {
         <app-error-state [message]="error()">
@@ -177,40 +177,16 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
               <div class="finance-grid__empty">
                 <app-empty-state
                   title="Sin ingresos mensuales"
-                  message="El backend no devolvió agrupación mensual para este rango."
+                  message="No hay ingresos mensuales registrados para este periodo."
                 />
               </div>
             }
           </app-card>
-
-          <app-card
-            title="Estado del backend"
-            subtitle="Confirmación visual de la conexión administrativa."
-          >
-            <div class="health">
-              <div class="health__row">
-                <span class="health__label">Periodo consultado</span>
-                <strong>{{ data.period.date_from }} → {{ data.period.date_to }}</strong>
-              </div>
-              <div class="health__row">
-                <span class="health__label">Aceptación promedio</span>
-                <strong>{{ formatMinutes(data.kpis.average_acceptance_time_minutes) }}</strong>
-              </div>
-              <div class="health__row">
-                <span class="health__label">Cierre promedio</span>
-                <strong>{{ formatMinutes(data.kpis.average_completion_time_minutes) }}</strong>
-              </div>
-              <div class="health__row">
-                <span class="health__label">Resolución al primer contacto</span>
-                <strong>{{ formatPercentage(data.kpis.first_contact_resolution_rate) }}</strong>
-              </div>
-            </div>
-          </app-card>
         </section>
       } @else {
         <app-empty-state
-          title="Sin respuesta del dashboard"
-          message="No se pudo obtener información útil del backend para mostrar el panel."
+          title="Información no disponible"
+          message="No hay información para mostrar en el panel en este momento."
         />
       }
     </div>
@@ -375,7 +351,7 @@ export class AdminDashboardPage {
           this.loading.set(false);
         },
         error: (error) => {
-          this.error.set(error.error?.detail ?? 'No se pudo cargar el dashboard real.');
+          this.error.set(error.error?.detail ?? 'No se pudo cargar el panel operativo.');
           this.loading.set(false);
         },
       });

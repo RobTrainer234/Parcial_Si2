@@ -23,27 +23,24 @@ import { ServiceTimelineItem } from '../data-access/audit.models';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule, 
-    RouterLink, 
+    CommonModule,
+    RouterLink,
     StatusBadgeComponent,
     AppCardComponent,
     EmptyStateComponent,
     ErrorStateComponent,
     LoadingStateComponent,
-    PageHeaderComponent
+    PageHeaderComponent,
   ],
   template: `
     <app-page-header
-      [title]="'Timeline del Servicio #' + (serviceId() || '...')"
-      subtitle="Historial cronológico de eventos y cambios de estado."
-      eyebrow="Auditoría / Timeline"
+      [title]="'Timeline del servicio #' + (serviceId() || '...')"
+      subtitle="Historial cronologico de eventos y cambios de estado."
+      eyebrow="Auditoria / Timeline"
     >
       <div page-actions>
-        <a
-          routerLink="/admin/audit"
-          class="app-button app-button--secondary"
-        >
-          Volver a auditoría
+        <a routerLink="/admin/audit" class="app-button app-button--secondary">
+          Volver a auditoria
         </a>
       </div>
     </app-page-header>
@@ -57,46 +54,46 @@ import { ServiceTimelineItem } from '../data-access/audit.models';
     @if (loading()) {
       <app-loading-state message="Cargando timeline del servicio..."></app-loading-state>
     } @else if (timeline().length === 0) {
-      <app-empty-state [message]="'No se encontró historial para el servicio #' + serviceId() + '.'"></app-empty-state>
+      <app-empty-state [message]="'No se encontro historial para el servicio #' + serviceId() + '.'"></app-empty-state>
     } @else {
       <app-card>
         <div class="timeline">
-          @for (item of timeline(); track $index) {
+          @for (item of timeline(); track item.audit_id) {
             <div class="timeline-item">
               <div class="timeline-item__marker"></div>
               <div class="timeline-item__content">
                 <div class="timeline-item__header">
-                  <strong>{{ item.event }}</strong>
+                  <strong>{{ item.event_type }}</strong>
                   <span class="timeline-item__date">{{ formatDate(item.timestamp) }}</span>
                 </div>
-                
+
                 <div class="timeline-item__body">
                   <div class="timeline-item__row">
-                    <span class="text-muted">Acción:</span>
+                    <span class="text-muted">Accion:</span>
                     <app-status-badge [label]="item.action" />
                   </div>
-                  <div class="timeline-item__row">
-                    <span class="text-muted">Actor:</span>
-                    <span>{{ item.actor || 'Sistema' }}</span>
+                  @if (item.service_state) {
+                    <div class="timeline-item__row">
+                      <span class="text-muted">Estado del servicio:</span>
+                      <span class="badge badge--info">{{ item.service_state }}</span>
+                    </div>
+                  }
+                  @if (item.incident_state) {
+                    <div class="timeline-item__row">
+                      <span class="text-muted">Estado del incidente:</span>
+                      <span class="badge badge--neutral">{{ item.incident_state }}</span>
+                    </div>
+                  }
+                  @if (item.description) {
+                    <div class="timeline-item__row">
+                      <span class="text-muted">Descripcion:</span>
+                      <span>{{ item.description }}</span>
+                    </div>
+                  }
+                  <div class="timeline-item__row mt-2">
+                    <span class="text-muted">Ref auditoria:</span>
+                    <span class="text-muted">#{{ item.audit_id }}</span>
                   </div>
-                  @if (item.state_change) {
-                    <div class="timeline-item__row">
-                      <span class="text-muted">Cambio de estado:</span>
-                      <span class="badge badge--info">{{ item.state_change }}</span>
-                    </div>
-                  }
-                  @if (item.short_description) {
-                    <div class="timeline-item__row">
-                      <span class="text-muted">Descripción:</span>
-                      <span>{{ item.short_description }}</span>
-                    </div>
-                  }
-                  @if (item.audit_id) {
-                    <div class="timeline-item__row mt-2">
-                      <span class="text-muted">Ref Auditoría:</span>
-                      <span class="text-muted">#{{ item.audit_id }}</span>
-                    </div>
-                  }
                 </div>
               </div>
             </div>
@@ -107,7 +104,6 @@ import { ServiceTimelineItem } from '../data-access/audit.models';
   `,
   styles: [
     `
-
       .timeline {
         display: flex;
         flex-direction: column;
@@ -179,17 +175,11 @@ import { ServiceTimelineItem } from '../data-access/audit.models';
         flex-wrap: wrap;
       }
 
-      .text-muted {
-        color: var(--color-text-muted);
-      }
-
-      .mt-2 {
-        margin-top: var(--space-2);
-      }
-      
-      .mb-4 {
-        margin-bottom: var(--space-4);
-      }
+      .badge--info { background: var(--color-primary); color: #fff; }
+      .badge--neutral { background: var(--color-surface-soft); border: 1px solid var(--color-border); }
+      .text-muted { color: var(--color-text-muted); }
+      .mt-2 { margin-top: var(--space-2); }
+      .mb-4 { margin-bottom: var(--space-4); }
     `,
   ],
 })
@@ -205,12 +195,13 @@ export class ServiceTimelinePage {
 
   constructor() {
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
-      const id = Number(params.get('serviceId'));
+      const rawId = params.get('serviceId');
+      const id = rawId ? Number(rawId) : NaN;
       if (Number.isInteger(id) && id > 0) {
         this.serviceId.set(id);
         this.loadTimeline(id);
       } else {
-        this.pageError.set('ID de servicio inválido.');
+        this.pageError.set('ID de servicio invalido.');
         this.loading.set(false);
       }
     });

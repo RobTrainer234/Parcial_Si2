@@ -19,7 +19,7 @@ import { AuditFilterOptions, AuditLogFilters } from '../data-access/audit.models
   template: `
     <section class="filter-panel app-card">
       <header class="filter-panel__header">
-        <h4>Filtros de Búsqueda</h4>
+        <h4>Filtros de busqueda</h4>
         <button
           type="button"
           class="app-button app-button--secondary app-button--sm"
@@ -42,7 +42,7 @@ import { AuditFilterOptions, AuditLogFilters } from '../data-access/audit.models
           </label>
 
           <label class="app-field">
-            <span class="app-field__label">Acción</span>
+            <span class="app-field__label">Accion</span>
             <select class="app-select" formControlName="action">
               <option value="">Todas</option>
               @for (action of filterOptions()?.actions || []; track action) {
@@ -63,9 +63,9 @@ import { AuditFilterOptions, AuditLogFilters } from '../data-access/audit.models
 
           <label class="app-field">
             <span class="app-field__label">Entidad</span>
-            <select class="app-select" formControlName="entity_type">
+            <select class="app-select" formControlName="main_entity">
               <option value="">Todas</option>
-              @for (entityType of filterOptions()?.entity_types || []; track entityType) {
+              @for (entityType of filterOptions()?.main_entities || []; track entityType) {
                 <option [value]="entityType">{{ entityType }}</option>
               }
             </select>
@@ -165,7 +165,7 @@ export class AuditFilterPanelComponent {
     date_to: [''],
     action: [''],
     event_type: [''],
-    entity_type: [''],
+    main_entity: [''],
     service_id: [null as number | null],
     incident_id: [null as number | null],
     request_id: [null as number | null],
@@ -175,16 +175,19 @@ export class AuditFilterPanelComponent {
     effect(() => {
       const filters = this.currentFilters();
       if (filters) {
-        this.filterForm.patchValue({
-          date_from: filters.date_from ?? '',
-          date_to: filters.date_to ?? '',
-          action: filters.action ?? '',
-          event_type: filters.event_type ?? '',
-          entity_type: filters.entity_type ?? '',
-          service_id: filters.service_id ?? null,
-          incident_id: filters.incident_id ?? null,
-          request_id: filters.request_id ?? null,
-        }, { emitEvent: false });
+        this.filterForm.patchValue(
+          {
+            date_from: filters.date_from ?? '',
+            date_to: filters.date_to ?? '',
+            action: filters.action ?? '',
+            event_type: filters.event_type ?? '',
+            main_entity: filters.main_entity ?? '',
+            service_id: filters.service_id ?? null,
+            incident_id: filters.incident_id ?? null,
+            request_id: filters.request_id ?? null,
+          },
+          { emitEvent: false },
+        );
       } else {
         this.filterForm.reset(undefined, { emitEvent: false });
       }
@@ -210,9 +213,12 @@ export class AuditFilterPanelComponent {
     if (raw.date_to) payload.date_to = raw.date_to;
     if (raw.action) payload.action = raw.action;
     if (raw.event_type) payload.event_type = raw.event_type;
-    if (raw.entity_type) payload.entity_type = raw.entity_type;
+    if (raw.main_entity) payload.main_entity = raw.main_entity;
 
-    const parsePositiveId = (val: number | string | null | undefined, errorMsg: string): number | undefined => {
+    const parsePositiveId = (
+      val: number | string | null | undefined,
+      errorMsg: string,
+    ): number | undefined => {
       if (val === null || val === undefined || val === '') {
         return undefined;
       }
@@ -232,8 +238,8 @@ export class AuditFilterPanelComponent {
 
       const rId = parsePositiveId(raw.request_id, 'Solicitud ID debe ser un entero positivo.');
       if (rId) payload.request_id = rId;
-    } catch (error: any) {
-      this.validationError = error.message;
+    } catch (error: unknown) {
+      this.validationError = error instanceof Error ? error.message : 'Filtro invalido.';
       return;
     }
 

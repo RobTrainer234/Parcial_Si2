@@ -7,7 +7,7 @@ import {
   AuditFilterOptions,
   AuditLogDetail,
   AuditLogFilters,
-  AuditLogSummary,
+  AuditLogPageResponse,
   ServiceTimelineItem,
 } from './audit.models';
 
@@ -25,9 +25,9 @@ function isPositiveInteger(value: unknown): value is number {
 export class AuditApi {
   private readonly http = inject(HttpClient);
 
-  listAuditLogs(filters?: AuditLogFilters): Observable<AuditLogSummary[]> {
+  listAuditLogs(filters?: AuditLogFilters): Observable<AuditLogPageResponse> {
     const params = this.buildParams(filters);
-    return this.http.get<AuditLogSummary[]>(buildApiUrl('/reputation/audit-logs'), {
+    return this.http.get<AuditLogPageResponse>(buildApiUrl('/reputation/audit-logs'), {
       params,
     });
   }
@@ -83,14 +83,21 @@ export class AuditApi {
     const eventType = trim(filters.event_type);
     if (eventType) params = params.set('event_type', eventType);
 
-    const entityType = trim(filters.entity_type);
-    if (entityType) params = params.set('entity_type', entityType);
+    const mainEntity = trim(filters.main_entity);
+    if (mainEntity) params = params.set('main_entity', mainEntity);
 
     if (isPositiveInteger(filters.service_id)) params = params.set('service_id', filters.service_id);
     if (isPositiveInteger(filters.incident_id)) params = params.set('incident_id', filters.incident_id);
     if (isPositiveInteger(filters.request_id)) params = params.set('request_id', filters.request_id);
-    if (isPositiveInteger(filters.actor_id)) params = params.set('actor_id', filters.actor_id);
-    if (isPositiveInteger(filters.user_id)) params = params.set('user_id', filters.user_id);
+    if (isPositiveInteger(filters.payment_id)) params = params.set('payment_id', filters.payment_id);
+    if (isPositiveInteger(filters.actor_user_id)) params = params.set('actor_user_id', filters.actor_user_id);
+
+    const search = trim(filters.search);
+    if (search) params = params.set('search', search);
+    if (isPositiveInteger(filters.limit)) params = params.set('limit', filters.limit);
+    if (typeof filters.offset === 'number' && Number.isInteger(filters.offset) && filters.offset >= 0) {
+      params = params.set('offset', filters.offset);
+    }
 
     return params;
   }

@@ -265,7 +265,7 @@ type CatalogFormMode = 'create' | 'edit' | null;
 
         <app-card
           title="Servicios configurados"
-          subtitle="Lista de servicios base que el backend usa para cotización y operación."
+          subtitle="Catálogo de servicios operativos del taller."
         >
           @if (catalogItems().length) {
             <div class="catalog-list">

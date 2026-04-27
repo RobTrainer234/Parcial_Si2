@@ -11,10 +11,9 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
     <aside class="sidebar">
       <div class="sidebar__brand">
         <p class="sidebar__eyebrow">SI2 Auxilio</p>
-        <h1>Workshop Control</h1>
+        <h1>Control del Taller</h1>
         <p class="sidebar__copy">
-          Panel operativo para coordinar servicios, operarios, auditoría y control
-          financiero del taller.
+          Gestiona solicitudes, operarios, servicios, auditoría y notificaciones del taller.
         </p>
       </div>
 
@@ -127,7 +126,7 @@ export class AdminSidebarComponent {
     exact?: boolean;
     badge?: string;
   }> = [
-    { label: 'Dashboard', path: '/admin/dashboard', exact: true },
+    { label: 'Panel', path: '/admin/dashboard', exact: true },
     { label: 'Perfil Taller', path: '/admin/workshop/profile' },
     { label: 'Catálogo', path: '/admin/workshop/catalog' },
     { label: 'Operarios', path: '/admin/workshop/staff' },

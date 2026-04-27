@@ -71,7 +71,7 @@ type DecisionConflictAction = 'catalog' | null;
       @if (successMessage()) {
         <app-card
           title="Operacion completada"
-          subtitle="Resultado de la ultima decision enviada al backend."
+          subtitle="Resultado de la última decisión enviada."
         >
           <p class="feedback feedback--success">{{ successMessage() }}</p>
         </app-card>
@@ -95,7 +95,7 @@ type DecisionConflictAction = 'catalog' | null;
       } @else if (!requests().length) {
         <app-empty-state
           title="Sin solicitudes pendientes"
-          message="El backend no devolvio solicitudes pendientes para este taller."
+          message="No hay solicitudes pendientes en este momento."
         />
       } @else {
         <section class="request-list">
@@ -110,7 +110,7 @@ type DecisionConflictAction = 'catalog' | null;
               @if (selectedRequestId() === item.request_id && decisionMode()) {
                 <app-card
                   title="Decision de la solicitud"
-                  subtitle="Confirma la accion antes de enviar el cambio al backend."
+                  subtitle="Confirma la acción antes de continuar."
                 >
                   <app-request-decision-panel
                     [mode]="decisionMode()"

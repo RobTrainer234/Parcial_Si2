@@ -12,7 +12,7 @@ import { AuditLogDetail } from '../data-access/audit.models';
   template: `
     <section class="detail-panel app-card">
       <header class="detail-panel__header">
-        <h4>Detalle de Auditoría #{{ detail()?.audit_id }}</h4>
+        <h4>Detalle de auditoria #{{ detail()?.audit_id }}</h4>
         <button
           type="button"
           class="app-button app-button--secondary app-button--sm"
@@ -26,82 +26,81 @@ import { AuditLogDetail } from '../data-access/audit.models';
         <div class="detail-panel__body">
           <div class="detail-grid">
             <div class="detail-item">
-              <span class="detail-label">Fecha y Hora</span>
+              <span class="detail-label">Fecha y hora</span>
               <span class="detail-value">{{ formatDate(log.timestamp) }}</span>
             </div>
             <div class="detail-item">
               <span class="detail-label">Actor</span>
-              <span class="detail-value">{{ log.actor || log.usuario || 'Sistema' }}</span>
+              <span class="detail-value">{{ actorLabel(log) }}</span>
             </div>
             <div class="detail-item">
-              <span class="detail-label">Acción</span>
+              <span class="detail-label">Accion</span>
               <span class="detail-value"><app-status-badge [label]="log.action" /></span>
             </div>
             <div class="detail-item">
-              <span class="detail-label">Tipo de Evento</span>
+              <span class="detail-label">Tipo de evento</span>
               <span class="detail-value">{{ log.event_type }}</span>
             </div>
             <div class="detail-item">
               <span class="detail-label">Entidad</span>
-              <span class="detail-value">{{ log.entity_type }} #{{ log.entity_id || '-' }}</span>
+              <span class="detail-value">{{ log.main_entity }} #{{ log.main_entity_id ?? '-' }}</span>
             </div>
             <div class="detail-item">
-              <span class="detail-label">Resultado/Estado</span>
-              <span class="detail-value">{{ log.result || log.status || '-' }}</span>
+              <span class="detail-label">Descripcion</span>
+              <span class="detail-value">{{ log.description || '-' }}</span>
             </div>
-            @if (log.service_id) {
+            @if (log.linked.service_id) {
               <div class="detail-item">
-                <span class="detail-label">Servicio Relacionado</span>
-                <span class="detail-value">#{{ log.service_id }}</span>
+                <span class="detail-label">Servicio relacionado</span>
+                <span class="detail-value">#{{ log.linked.service_id }}</span>
               </div>
             }
-            @if (log.incident_id) {
+            @if (log.linked.incident_id) {
               <div class="detail-item">
-                <span class="detail-label">Incidente Relacionado</span>
-                <span class="detail-value">#{{ log.incident_id }}</span>
+                <span class="detail-label">Incidente relacionado</span>
+                <span class="detail-value">#{{ log.linked.incident_id }}</span>
               </div>
             }
-            @if (log.request_id) {
+            @if (log.linked.request_id) {
               <div class="detail-item">
-                <span class="detail-label">Solicitud Relacionada</span>
-                <span class="detail-value">#{{ log.request_id }}</span>
+                <span class="detail-label">Solicitud relacionada</span>
+                <span class="detail-value">#{{ log.linked.request_id }}</span>
+              </div>
+            }
+            @if (log.linked.payment_id) {
+              <div class="detail-item">
+                <span class="detail-label">Pago relacionado</span>
+                <span class="detail-value">#{{ log.linked.payment_id }}</span>
               </div>
             }
             <div class="detail-item">
-              <span class="detail-label">IP / Dispositivo</span>
-              <span class="detail-value">{{ log.ip_address || '-' }} / {{ log.device_info || '-' }}</span>
+              <span class="detail-label">IP / User agent</span>
+              <span class="detail-value">{{ log.ip_origen || '-' }} / {{ log.user_agent || '-' }}</span>
             </div>
           </div>
 
-          @if (log.hash_integridad) {
+          @if (log.hash_evento) {
             <div class="detail-hash mt-4">
-              <span class="detail-label">Hash de Integridad</span>
-              <code class="hash-box">{{ log.hash_integridad }}</code>
+              <span class="detail-label">Hash de integridad</span>
+              <code class="hash-box">{{ log.hash_evento }}</code>
             </div>
           }
 
-          @if (hasTechnicalDetails(log)) {
+          @if (log.has_original_data || log.has_new_data) {
             <div class="technical-details mt-4">
-              <h5 class="mb-3">Detalles Técnicos</h5>
-              
-              @if (log.previous_state) {
+              <h5 class="mb-3">Datos auditables</h5>
+
+              @if (log.has_original_data) {
                 <div class="json-block mb-3">
-                  <span class="detail-label">Estado Anterior</span>
-                  <pre><code>{{ formatJson(log.previous_state) }}</code></pre>
+                  <span class="detail-label">Datos originales</span>
+                  <pre><code>{{ formatJson(log.datos_originales) }}</code></pre>
                 </div>
               }
-              
-              @if (log.new_state) {
-                <div class="json-block mb-3">
-                  <span class="detail-label">Estado Nuevo</span>
-                  <pre><code>{{ formatJson(log.new_state) }}</code></pre>
-                </div>
-              }
-              
-              @if (log.detalle_json || log.metadata) {
+
+              @if (log.has_new_data) {
                 <div class="json-block">
-                  <span class="detail-label">Metadatos / Detalle</span>
-                  <pre><code>{{ formatJson(log.detalle_json || log.metadata) }}</code></pre>
+                  <span class="detail-label">Datos nuevos</span>
+                  <pre><code>{{ formatJson(log.datos_nuevos) }}</code></pre>
                 </div>
               }
             </div>
@@ -216,22 +215,31 @@ export class AuditDetailPanelComponent {
     }).format(date);
   }
 
-  protected hasTechnicalDetails(log: AuditLogDetail): boolean {
-    return Boolean(
-      log.previous_state || log.new_state || log.detalle_json || log.metadata
-    );
+  protected actorLabel(log: AuditLogDetail): string {
+    if (log.actor?.email) {
+      return log.actor.email;
+    }
+    if (log.actor?.tipo_usuario && log.actor?.user_id) {
+      return `${log.actor.tipo_usuario} #${log.actor.user_id}`;
+    }
+    if (log.actor?.user_id) {
+      return `Usuario #${log.actor.user_id}`;
+    }
+    return 'Sistema';
   }
 
   protected formatJson(data: unknown): string {
+    if (data === null || data === undefined) {
+      return '-';
+    }
+
     try {
       if (typeof data === 'string') {
-        // Handle pre-stringified JSON
         const parsed = JSON.parse(data);
         return JSON.stringify(parsed, null, 2);
       }
       return JSON.stringify(data, null, 2);
     } catch {
-      // Fallback for non-JSON strings or circular structures
       return String(data);
     }
   }

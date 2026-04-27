@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { buildApiUrl } from '../../../core/config/api.config';
-import { NotificationDetail, NotificationFilters, NotificationSummary } from './notifications.models';
+import { NotificationFilters, NotificationSummary } from './notifications.models';
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -24,18 +24,9 @@ export class NotificationsPageApi {
     return this.http.get<NotificationSummary[]>(buildApiUrl('/notifications/me'), { params });
   }
 
-  getNotificationDetail(notificationId: number): Observable<NotificationDetail> {
-    assertPositiveInteger(notificationId, 'notificationId');
-    return this.http.get<NotificationDetail>(buildApiUrl(`/notifications/${notificationId}`));
-  }
-
   markAsRead(notificationId: number): Observable<void> {
     assertPositiveInteger(notificationId, 'notificationId');
-    return this.http.patch<void>(buildApiUrl(`/notifications/${notificationId}/read`), {});
-  }
-
-  markAllAsRead(): Observable<void> {
-    return this.http.patch<void>(buildApiUrl('/notifications/me/read-all'), {});
+    return this.http.post<void>(buildApiUrl(`/notifications/${notificationId}/read`), {});
   }
 
   private buildParams(filters?: NotificationFilters): HttpParams {
@@ -50,23 +41,7 @@ export class NotificationsPageApi {
     };
 
     const status = trim(filters.status);
-    if (status && status !== 'all') params = params.set('status', status);
-
-    const type = trim(filters.type);
-    if (type) params = params.set('type', type);
-
-    const priority = trim(filters.priority);
-    if (priority) params = params.set('priority', priority);
-
-    const dateFrom = trim(filters.date_from);
-    if (dateFrom) params = params.set('date_from', dateFrom);
-
-    const dateTo = trim(filters.date_to);
-    if (dateTo) params = params.set('date_to', dateTo);
-
-    if (isPositiveInteger(filters.service_id)) params = params.set('service_id', filters.service_id);
-    if (isPositiveInteger(filters.incident_id)) params = params.set('incident_id', filters.incident_id);
-    if (isPositiveInteger(filters.request_id)) params = params.set('request_id', filters.request_id);
+    if (status === 'unread') params = params.set('only_unread', 'true');
 
     return params;
   }

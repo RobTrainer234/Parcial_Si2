@@ -15,10 +15,10 @@ import { ThemeService } from '../../theme/theme.service';
   template: `
     <header class="topbar">
       <div class="topbar__context">
-        <p class="topbar__label">Workshop Administration</p>
+        <p class="topbar__label">Panel administrativo</p>
         <strong>{{ currentUserEmail() }}</strong>
-        @if (workshopId(); as workshopId) {
-          <p class="topbar__meta">Taller #{{ workshopId }}</p>
+        @if (workshopId()) {
+          <p class="topbar__meta">Taller asignado</p>
         }
       </div>
 
@@ -45,9 +45,13 @@ import { ThemeService } from '../../theme/theme.service';
 
         <div class="topbar__role">{{ currentUserRole() }}</div>
 
-        <div class="topbar__user-pill" [attr.aria-label]="'Usuario ' + currentUserEmail()">
+        <a
+          routerLink="/admin/account/profile"
+          class="topbar__user-pill"
+          [attr.aria-label]="'Abrir perfil de usuario ' + currentUserEmail()"
+        >
           {{ userInitials() }}
-        </div>
+        </a>
 
         <button type="button" class="app-button app-button--secondary" (click)="logout.emit()">
           Cerrar sesión
@@ -139,6 +143,12 @@ import { ThemeService } from '../../theme/theme.service';
       .topbar__user-pill {
         color: var(--color-text);
         font-weight: 700;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      
+      .topbar__user-pill:hover {
+        background: color-mix(in srgb, var(--color-surface-soft) 80%, var(--color-primary) 20%);
       }
 
       .topbar__role {

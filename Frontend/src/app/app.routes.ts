@@ -101,6 +101,13 @@ export const routes: Routes = [
             (m) => m.NotificationsPage,
           ),
       },
+      {
+        path: 'account/profile',
+        loadComponent: () =>
+          import('./packages/seguridad-usuarios/pages/user-profile.page').then(
+            (m) => m.UserProfilePage,
+          ),
+      },
     ],
   },
   {
