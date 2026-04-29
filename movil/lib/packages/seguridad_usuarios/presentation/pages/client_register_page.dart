@@ -114,17 +114,15 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
         ],
       );
 
-      final response = await ref
-          .read(authRepositoryProvider)
-          .startClientRegistration(request);
+      await ref.read(authRepositoryProvider).startClientRegistration(request);
 
       if (mounted) {
-        context.push(
-          AppRoutes.registerClientVerify,
+        context.go(
+          AppRoutes.login,
           extra: {
-            'registration_token': response.registrationToken,
-            'verification_code_for_testing':
-                response.verificationCodeForTesting,
+            'initial_email': _emailController.text.trim(),
+            'success_message':
+                'Cuenta creada correctamente. Ya puedes iniciar sesion.',
           },
         );
       }
@@ -137,18 +135,16 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
           message = 'Revisa los datos ingresados.';
         } else if (e.statusCode == 400) {
           message =
-              'No se pudo iniciar el registro. Revisa los datos enviados.';
+              'No se pudo completar el registro. Revisa los datos enviados.';
         } else if (e.statusCode != null && e.statusCode! >= 500) {
           message =
-              'No se pudo iniciar el registro por un problema del servidor.';
+              'No se pudo completar el registro por un problema del servidor.';
         } else {
-          message =
-              'No se pudo conectar con el servidor. Revisa tu conexión.';
+          message = 'No se pudo conectar con el servidor. Revisa tu conexión.';
         }
         _showError(message);
       } else {
-        _showError(
-            'No se pudo conectar con el servidor. Revisa tu conexión.');
+        _showError('No se pudo conectar con el servidor. Revisa tu conexión.');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -261,11 +257,14 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                       labelText: 'Contraseña',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
-                        icon: Icon(_obscurePassword
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined),
+                        onPressed: () => setState(
+                          () => _obscurePassword = !_obscurePassword,
+                        ),
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
                       ),
                     ),
                     obscureText: _obscurePassword,
@@ -285,9 +284,11 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                       suffixIcon: IconButton(
                         onPressed: () =>
                             setState(() => _obscureConfirm = !_obscureConfirm),
-                        icon: Icon(_obscureConfirm
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined),
+                        icon: Icon(
+                          _obscureConfirm
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
                       ),
                     ),
                     obscureText: _obscureConfirm,
@@ -389,7 +390,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
             const SizedBox(height: 24),
 
             AppPrimaryButton(
-              label: 'Continuar',
+              label: 'Crear cuenta',
               isLoading: _isLoading,
               onPressed: _isLoading ? null : _submit,
             ),
@@ -398,8 +399,9 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
 
             Center(
               child: TextButton(
-                onPressed:
-                    _isLoading ? null : () => context.go(AppRoutes.login),
+                onPressed: _isLoading
+                    ? null
+                    : () => context.go(AppRoutes.login),
                 child: Text(
                   '¿Ya tienes cuenta? Inicia sesión',
                   style: TextStyle(color: theme.colorScheme.primary),

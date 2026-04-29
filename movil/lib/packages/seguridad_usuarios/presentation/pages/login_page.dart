@@ -11,7 +11,10 @@ import '../../../../core/widgets/app_primary_button.dart';
 import '../../../../core/widgets/app_section_header.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({super.key, this.initialEmail, this.successMessage});
+
+  final String? initialEmail;
+  final String? successMessage;
 
   @override
   ConsumerState<LoginPage> createState() => _LoginPageState();
@@ -22,6 +25,24 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialEmail = widget.initialEmail?.trim();
+    if (initialEmail != null && initialEmail.isNotEmpty) {
+      _emailController.text = initialEmail;
+    }
+    final successMessage = widget.successMessage?.trim();
+    if (successMessage != null && successMessage.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(successMessage)));
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -44,10 +65,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (!_formKey.currentState!.validate()) return;
 
     try {
-      await ref.read(authControllerProvider.notifier).login(
-            _emailController.text.trim(),
-            _passwordController.text,
-          );
+      await ref
+          .read(authControllerProvider.notifier)
+          .login(_emailController.text.trim(), _passwordController.text);
 
       if (mounted) {
         final role = ref.read(authControllerProvider).valueOrNull?.role;
@@ -113,7 +133,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.12,
+                          ),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Icon(

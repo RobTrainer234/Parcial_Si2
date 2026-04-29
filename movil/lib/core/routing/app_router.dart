@@ -22,7 +22,6 @@ import '../../packages/operaciones_taller/presentation/pages/operator_service_de
 import '../../packages/reputacion_auditoria/presentation/pages/service_rating_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/admin_mobile_info_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/client_register_page.dart';
-import '../../packages/seguridad_usuarios/presentation/pages/client_register_verify_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/login_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/profile_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/splash_page.dart';
@@ -111,7 +110,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.login,
-        builder: (context, state) => const LoginPage(),
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return LoginPage(
+            initialEmail: extra?['initial_email'] as String?,
+            successMessage: extra?['success_message'] as String?,
+          );
+        },
       ),
       GoRoute(
         path: AppRoutes.registerClient,
@@ -119,17 +124,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.registerClientVerify,
-        builder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          if (extra == null || extra['registration_token'] == null) {
-            return const ClientRegisterPage();
-          }
-          return ClientRegisterVerifyPage(
-            registrationToken: extra['registration_token'] as String,
-            verificationCodeForTesting:
-                extra['verification_code_for_testing'] as String?,
-          );
-        },
+        builder: (context, state) => const ClientRegisterPage(),
       ),
       GoRoute(
         path: AppRoutes.clientHome,
@@ -220,10 +215,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             );
           }
           final result = state.extra as HireWorkshopResponseModel?;
-          return WorkshopRequestSentPage(
-            incidentId: id,
-            result: result,
-          );
+          return WorkshopRequestSentPage(incidentId: id, result: result);
         },
       ),
       GoRoute(
