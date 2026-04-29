@@ -24,19 +24,14 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
 
-  // Personal
   final _nombreController = TextEditingController();
   final _apellidoController = TextEditingController();
   final _ciController = TextEditingController();
   final _telefonoController = TextEditingController();
   final _direccionController = TextEditingController();
-
-  // Access
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-
-  // Vehicle
   final _placaController = TextEditingController();
   final _anioController = TextEditingController();
   final _marcaController = TextEditingController();
@@ -74,16 +69,16 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
   String _mapConflictMessage(dynamic details) {
     final detailStr = details?.toString().toLowerCase() ?? '';
     if (detailStr.contains('email')) {
-      return 'Ese correo ya está registrado.';
+      return 'Ese correo ya esta registrado.';
     }
     if (detailStr.contains('ci')) {
-      return 'Ese CI ya está registrado.';
+      return 'Ese CI ya esta registrado.';
     }
     if (detailStr.contains('phone') || detailStr.contains('telefono')) {
-      return 'Ese teléfono ya está registrado.';
+      return 'Ese telefono ya esta registrado.';
     }
     if (detailStr.contains('plate') || detailStr.contains('placa')) {
-      return 'Esa placa ya está registrada.';
+      return 'Esa placa ya esta registrada.';
     }
     return 'Ya existe un registro con esos datos.';
   }
@@ -114,18 +109,24 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
         ],
       );
 
-      await ref.read(authRepositoryProvider).startClientRegistration(request);
+      final response = await ref
+          .read(authRepositoryProvider)
+          .startClientRegistration(request);
 
-      if (mounted) {
-        context.go(
-          AppRoutes.login,
-          extra: {
-            'initial_email': _emailController.text.trim(),
-            'success_message':
-                'Cuenta creada correctamente. Ya puedes iniciar sesion.',
-          },
-        );
+      if (response.status.trim().toLowerCase() != 'created') {
+        _showError('No se pudo crear la cuenta. Intenta nuevamente.');
+        return;
       }
+
+      if (!mounted) return;
+      context.go(
+        AppRoutes.login,
+        extra: {
+          'initial_email': _emailController.text.trim(),
+          'success_message':
+              'Cuenta creada correctamente. Ya puedes iniciar sesion.',
+        },
+      );
     } catch (e) {
       if (e is ApiException) {
         String message;
@@ -140,11 +141,11 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
           message =
               'No se pudo completar el registro por un problema del servidor.';
         } else {
-          message = 'No se pudo conectar con el servidor. Revisa tu conexión.';
+          message = 'No se pudo crear la cuenta. Intenta nuevamente.';
         }
         _showError(message);
       } else {
-        _showError('No se pudo conectar con el servidor. Revisa tu conexión.');
+        _showError('No se pudo crear la cuenta. Intenta nuevamente.');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -163,8 +164,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
         key: _formKey,
         child: ListView(
           children: [
-            // --- Datos personales ---
-            _SectionTitle(title: 'Datos personales'),
+            const _SectionTitle(title: 'Datos personales'),
             const SizedBox(height: 12),
             AppCard(
               child: Column(
@@ -207,7 +207,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                   TextFormField(
                     controller: _telefonoController,
                     decoration: const InputDecoration(
-                      labelText: 'Teléfono',
+                      labelText: 'Telefono',
                       prefixIcon: Icon(Icons.phone_outlined),
                     ),
                     keyboardType: TextInputType.phone,
@@ -219,7 +219,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                   TextFormField(
                     controller: _direccionController,
                     decoration: const InputDecoration(
-                      labelText: 'Dirección (opcional)',
+                      labelText: 'Direccion (opcional)',
                       prefixIcon: Icon(Icons.location_on_outlined),
                     ),
                     enabled: !_isLoading,
@@ -227,11 +227,8 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                 ],
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // --- Datos de acceso ---
-            _SectionTitle(title: 'Datos de acceso'),
+            const _SectionTitle(title: 'Datos de acceso'),
             const SizedBox(height: 12),
             AppCard(
               child: Column(
@@ -239,14 +236,14 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                   TextFormField(
                     controller: _emailController,
                     decoration: const InputDecoration(
-                      labelText: 'Correo electrónico',
+                      labelText: 'Correo electronico',
                       prefixIcon: Icon(Icons.email_outlined),
                     ),
                     keyboardType: TextInputType.emailAddress,
                     enabled: !_isLoading,
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Requerido';
-                      if (!v.contains('@')) return 'Correo no válido';
+                      if (!v.contains('@')) return 'Correo no valido';
                       return null;
                     },
                   ),
@@ -254,7 +251,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                   TextFormField(
                     controller: _passwordController,
                     decoration: InputDecoration(
-                      labelText: 'Contraseña',
+                      labelText: 'Contrasena',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
                         onPressed: () => setState(
@@ -271,7 +268,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                     enabled: !_isLoading,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Requerido';
-                      if (v.length < 8) return 'Mínimo 8 caracteres';
+                      if (v.length < 8) return 'Minimo 8 caracteres';
                       return null;
                     },
                   ),
@@ -279,7 +276,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                   TextFormField(
                     controller: _confirmPasswordController,
                     decoration: InputDecoration(
-                      labelText: 'Confirmar contraseña',
+                      labelText: 'Confirmar contrasena',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
                         onPressed: () =>
@@ -296,7 +293,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Requerido';
                       if (v != _passwordController.text) {
-                        return 'Las contraseñas no coinciden';
+                        return 'Las contrasenas no coinciden';
                       }
                       return null;
                     },
@@ -304,11 +301,8 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                 ],
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // --- Vehículo ---
-            _SectionTitle(title: 'Vehículo inicial'),
+            const _SectionTitle(title: 'Vehiculo inicial'),
             const SizedBox(height: 12),
             AppCard(
               child: Column(
@@ -323,8 +317,8 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                     enabled: !_isLoading,
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Requerido';
-                      if (v.trim().length < 3) return 'Mínimo 3 caracteres';
-                      if (v.trim().length > 15) return 'Máximo 15 caracteres';
+                      if (v.trim().length < 3) return 'Minimo 3 caracteres';
+                      if (v.trim().length > 15) return 'Maximo 15 caracteres';
                       return null;
                     },
                   ),
@@ -332,7 +326,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                   TextFormField(
                     controller: _anioController,
                     decoration: const InputDecoration(
-                      labelText: 'Año',
+                      labelText: 'Anio',
                       prefixIcon: Icon(Icons.calendar_today_outlined),
                     ),
                     keyboardType: TextInputType.number,
@@ -340,7 +334,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Requerido';
                       final year = int.tryParse(v.trim());
-                      if (year == null) return 'Año no válido';
+                      if (year == null) return 'Anio no valido';
                       if (year < 1900 || year > 2100) {
                         return 'Entre 1900 y 2100';
                       }
@@ -386,29 +380,24 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
                 ],
               ),
             ),
-
             const SizedBox(height: 24),
-
             AppPrimaryButton(
               label: 'Crear cuenta',
               isLoading: _isLoading,
               onPressed: _isLoading ? null : _submit,
             ),
-
             const SizedBox(height: 16),
-
             Center(
               child: TextButton(
                 onPressed: _isLoading
                     ? null
                     : () => context.go(AppRoutes.login),
                 child: Text(
-                  '¿Ya tienes cuenta? Inicia sesión',
+                  'Ya tienes cuenta? Inicia sesion',
                   style: TextStyle(color: theme.colorScheme.primary),
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
           ],
         ),
@@ -419,6 +408,7 @@ class _ClientRegisterPageState extends ConsumerState<ClientRegisterPage> {
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title});
+
   final String title;
 
   @override
