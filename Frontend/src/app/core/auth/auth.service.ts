@@ -22,6 +22,17 @@ export class AuthService {
       this.http.post<LoginResponse>(buildApiUrl('/auth/login'), payload),
     );
 
+    if (
+      !response ||
+      !response.user ||
+      !response.access_token ||
+      !response.token_type
+    ) {
+      throw new Error(
+        'No se pudo iniciar sesion. Verifica la conexion con el servidor.',
+      );
+    }
+
     const resolvedRole = this.resolveRole(response.user, response.role);
     if (resolvedRole !== 'ADMINISTRADOR') {
       this.clearSession();
