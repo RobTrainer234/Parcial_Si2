@@ -5,6 +5,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Especialidad, MetodoPago
 
@@ -14,9 +15,10 @@ router = APIRouter(prefix="/health", tags=["health"])
 
 @router.get("")
 def health() -> dict[str, str]:
+    settings = get_settings()
     return {
-        "app": "Proyecto SI2 Backend",
-        "environment": "local",
+        "app": settings.app_name,
+        "environment": settings.environment,
         "status": "ok",
     }
 

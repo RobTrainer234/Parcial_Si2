@@ -28,11 +28,29 @@ def _get_bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_csv_env(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    items = tuple(part.strip() for part in value.split(",") if part.strip())
+    return items or default
+
+
+def _get_optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
     environment: str
     database_url: str
+    cors_allow_origins: tuple[str, ...]
+    cors_allow_origin_regex: str | None
     jwt_secret_key: str
     jwt_algorithm: str
     access_token_expire_minutes: int
@@ -40,6 +58,7 @@ class Settings:
     lockout_minutes: int
     storage_backend: str
     local_media_root: Path
+    media_public_base_url: str
     triage_ai_provider: str
     triage_ai_api_key: str | None
     triage_ai_model: str
@@ -68,6 +87,17 @@ def get_settings() -> Settings:
         app_name=os.getenv("APP_NAME", "Proyecto SI2 Backend"),
         environment=os.getenv("APP_ENV", "local"),
         database_url=_get_required_env("DATABASE_URL"),
+        cors_allow_origins=_get_csv_env(
+            "CORS_ALLOW_ORIGINS",
+            default=(
+                "http://localhost:4200",
+                "http://127.0.0.1:4200",
+            ),
+        ),
+        cors_allow_origin_regex=(
+            _get_optional_env("CORS_ALLOW_ORIGIN_REGEX")
+            or r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$"
+        ),
         jwt_secret_key=_get_required_env("JWT_SECRET_KEY"),
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")),
@@ -77,6 +107,7 @@ def get_settings() -> Settings:
         lockout_minutes=int(os.getenv("LOCKOUT_MINUTES", "5")),
         storage_backend=os.getenv("STORAGE_BACKEND", "local"),
         local_media_root=Path(os.getenv("LOCAL_MEDIA_ROOT", str(BACKEND_DIR / "media"))),
+        media_public_base_url=os.getenv("MEDIA_PUBLIC_BASE_URL", "/media").rstrip("/"),
         triage_ai_provider=os.getenv("TRIAGE_AI_PROVIDER", "groq"),
         triage_ai_api_key=os.getenv("TRIAGE_AI_API_KEY"),
         triage_ai_model=os.getenv(

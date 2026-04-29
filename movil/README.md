@@ -1,16 +1,23 @@
 # movil
 
-A new Flutter project.
+## API base URL
 
-## Getting Started
+La app usa una URL base centralizada en:
 
-This project is a starting point for a Flutter application.
+- `movil/lib/core/config/app_config.dart`
 
-A few resources to get you started if this is your first Flutter project:
+Por defecto apunta a:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- `http://localhost/api`
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Ejecutar contra Docker/Nginx
+
+```bash
+flutter run -d chrome --dart-define=API_BASE_URL=http://localhost/api
+```
+
+### Ejecutar contra backend directo
+
+```bash
+flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000/api
+```

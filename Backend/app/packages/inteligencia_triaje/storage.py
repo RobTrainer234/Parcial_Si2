@@ -167,3 +167,15 @@ def get_triage_storage() -> LocalIncidentStorage:
     if settings.storage_backend.lower() != "local":
         raise RuntimeError("Only local storage is currently supported.")
     return LocalIncidentStorage(settings.local_media_root)
+
+
+def build_public_media_url(locator: str) -> str:
+    if locator.startswith(("http://", "https://", "/media/")):
+        return locator
+    if not locator.startswith("local://"):
+        return locator
+
+    settings = get_settings()
+    relative_path = locator.removeprefix("local://").lstrip("/")
+    base_url = settings.media_public_base_url or "/media"
+    return f"{base_url.rstrip('/')}/{relative_path}"

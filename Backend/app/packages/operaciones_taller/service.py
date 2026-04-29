@@ -37,6 +37,7 @@ from app.packages.seguridad_usuarios.security import hash_password
 from app.packages.inteligencia_triaje.matchmaking import build_ranked_candidate
 from app.packages.inteligencia_triaje.service import rematch_incident_after_workshop_rejection
 from app.packages.inteligencia_triaje.storage import (
+    build_public_media_url,
     IMAGE_MIME_PREFIX,
     StorageError,
     StoredMedia,
@@ -420,7 +421,7 @@ def _serialize_workshop_media_file(item: TallerArchivo) -> WorkshopMediaFileResp
         id_taller_archivo=item.id_taller_archivo,
         tipo_archivo=item.tipo_archivo,
         nombre_archivo=item.nombre_archivo,
-        url_archivo=item.url_archivo,
+        url_archivo=build_public_media_url(item.url_archivo),
         mime_type=item.mime_type,
         tamano_bytes=item.tamano_bytes,
         fecha_registro=item.fecha_registro,
@@ -1443,7 +1444,7 @@ def _serialize_final_evidence(item: Evidencia) -> FinalEvidenceResponse:
         id_evidencia=item.id_evidencia,
         tipo_evidencia=item.tipo_evidencia,
         categoria=item.categoria,
-        url_archivo=item.url_archivo,
+        url_archivo=build_public_media_url(item.url_archivo),
         mime_type=item.mime_type,
         tamano_bytes=item.tamano_bytes,
         fecha_registro=item.fecha_registro,

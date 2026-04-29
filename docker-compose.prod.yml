@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_NAME: ${APP_NAME}
+      APP_ENV: ${APP_ENV}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      REGISTRATION_TOKEN_EXPIRE_MINUTES: ${REGISTRATION_TOKEN_EXPIRE_MINUTES}
+      LOCKOUT_MINUTES: ${LOCKOUT_MINUTES}
+      SQLALCHEMY_ECHO: ${SQLALCHEMY_ECHO}
+      STORAGE_BACKEND: ${STORAGE_BACKEND}
+      LOCAL_MEDIA_ROOT: ${LOCAL_MEDIA_ROOT}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+      CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX}
+      TRIAGE_AI_PROVIDER: ${TRIAGE_AI_PROVIDER}
+      TRIAGE_AI_API_KEY: ${TRIAGE_AI_API_KEY}
+      TRIAGE_AI_MODEL: ${TRIAGE_AI_MODEL}
+      TRIAGE_AUTO_RUN_AFTER_REPORT: ${TRIAGE_AUTO_RUN_AFTER_REPORT}
+      TRIAGE_MIN_CONFIDENCE: ${TRIAGE_MIN_CONFIDENCE}
+      TRIAGE_AI_TIMEOUT_SECONDS: ${TRIAGE_AI_TIMEOUT_SECONDS}
+      MATCHMAKING_REQUEST_TTL_SECONDS: ${MATCHMAKING_REQUEST_TTL_SECONDS}
+      WORKSHOP_MAX_ACTION_RADIUS_KM: ${WORKSHOP_MAX_ACTION_RADIUS_KM}
+      MAPS_PROVIDER: ${MAPS_PROVIDER}
+      MAPS_BASE_URL: ${MAPS_BASE_URL}
+      MAPS_API_KEY: ${MAPS_API_KEY}
+      NAVIGATION_ARRIVAL_THRESHOLD_METERS: ${NAVIGATION_ARRIVAL_THRESHOLD_METERS}
+      NAVIGATION_PROVIDER_TIMEOUT_SECONDS: ${NAVIGATION_PROVIDER_TIMEOUT_SECONDS}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER}
+      PAYMENT_WEBHOOK_TOKEN: ${PAYMENT_WEBHOOK_TOKEN}
+      PAYMENT_REQUEST_EXPIRE_MINUTES: ${PAYMENT_REQUEST_EXPIRE_MINUTES}
+      PUSH_PROVIDER: ${PUSH_PROVIDER}
+      FCM_CREDENTIALS_FILE: ${FCM_CREDENTIALS_FILE}
+    command: >
+      sh -c "alembic upgrade head &&
+            uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+    volumes:
+      - backend_media:/app/media
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - backend_media:/srv/media:ro
+
+volumes:
+  postgres_data:
+  backend_media:

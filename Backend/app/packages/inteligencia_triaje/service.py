@@ -58,6 +58,7 @@ from .schemas import (
 )
 from .storage import (
     AUDIO_MIME_PREFIX,
+    build_public_media_url,
     IMAGE_MIME_PREFIX,
     StoredMedia,
     StorageError,
@@ -195,7 +196,7 @@ def _serialize_evidence(evidence: Evidencia) -> IncidentEvidenceResponse:
         id_evidencia=evidence.id_evidencia,
         tipo_evidencia=evidence.tipo_evidencia,
         categoria=evidence.categoria,
-        url_archivo=evidence.url_archivo,
+        url_archivo=build_public_media_url(evidence.url_archivo),
         mime_type=evidence.mime_type,
         tamano_bytes=evidence.tamano_bytes,
         fecha_registro=evidence.fecha_registro,

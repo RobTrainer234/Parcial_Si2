@@ -71,3 +71,5 @@ Backend/media/
 AGENTS.md
 PROJECT_MAP.md
 base_de_datos.sql
+
+deploy_backup/

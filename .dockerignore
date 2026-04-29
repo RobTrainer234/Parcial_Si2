@@ -1,0 +1,16 @@
+Backend/venv/
+Backend/.venv/
+Backend/env/
+Backend/__pycache__/
+Backend/media/
+Backend/.env
+Backend/.env.*
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.angular/
+Frontend/.cache/
+movil/.dart_tool/
+movil/build/
+movil/.flutter-plugins
+movil/.flutter-plugins-dependencies
+.git/
