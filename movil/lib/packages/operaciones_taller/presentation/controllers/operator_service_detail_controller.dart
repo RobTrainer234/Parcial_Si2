@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/auth/auth_controller.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../data/models/operator_navigation_status_model.dart';
 import '../../data/models/operator_progress_response_model.dart';
@@ -18,18 +19,28 @@ class OperatorServiceDetailViewModel {
   });
 }
 
-final operatorServiceDetailProvider = StateNotifierProvider.family<
-    OperatorServiceDetailController,
-    AsyncValue<OperatorServiceDetailViewModel>,
-    int>((ref, serviceId) {
-  final repository = ref.watch(operatorServicesRepositoryProvider);
-  return OperatorServiceDetailController(repository, serviceId);
-});
+final operatorServiceDetailProvider =
+    StateNotifierProvider.family<
+      OperatorServiceDetailController,
+      AsyncValue<OperatorServiceDetailViewModel>,
+      int
+    >((ref, serviceId) {
+      ref.watch(
+        authControllerProvider.select((state) {
+          final user = state.valueOrNull?.user;
+          return user == null
+              ? null
+              : '${user.userId}:${user.actorContext.operarioId ?? user.personaId}';
+        }),
+      );
+      final repository = ref.watch(operatorServicesRepositoryProvider);
+      return OperatorServiceDetailController(repository, serviceId);
+    });
 
 class OperatorServiceDetailController
     extends StateNotifier<AsyncValue<OperatorServiceDetailViewModel>> {
   OperatorServiceDetailController(this._repository, this._serviceId)
-      : super(const AsyncValue.loading()) {
+    : super(const AsyncValue.loading()) {
     load();
   }
 

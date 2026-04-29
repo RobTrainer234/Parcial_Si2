@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/auth/auth_controller.dart';
 import '../../data/models/notification_item_model.dart';
 import '../../data/repositories/notifications_repository.dart';
 
@@ -15,38 +16,59 @@ class NotificationsState {
   });
 }
 
-final notificationsControllerProvider = StateNotifierProvider<
-    NotificationsController,
-    AsyncValue<NotificationsState>>((ref) {
-  final repository = ref.watch(notificationsRepositoryProvider);
-  return NotificationsController(ref, repository);
-});
+final notificationsControllerProvider =
+    StateNotifierProvider<
+      NotificationsController,
+      AsyncValue<NotificationsState>
+    >((ref) {
+      final repository = ref.watch(notificationsRepositoryProvider);
+      final authenticatedUserId = ref.watch(
+        authControllerProvider.select(
+          (state) => state.valueOrNull?.user?.userId,
+        ),
+      );
+      return NotificationsController(
+        ref,
+        repository,
+        shouldLoad: authenticatedUserId != null,
+      );
+    });
 
 final unreadNotificationsCountProvider = FutureProvider<int>((ref) async {
+  final authenticatedUserId = ref.watch(
+    authControllerProvider.select((state) => state.valueOrNull?.user?.userId),
+  );
+  if (authenticatedUserId == null) {
+    return 0;
+  }
   final repository = ref.watch(notificationsRepositoryProvider);
   return repository.getUnreadCount();
 });
 
 class NotificationsController
     extends StateNotifier<AsyncValue<NotificationsState>> {
-  NotificationsController(this._ref, this._repository)
-      : super(
-          const AsyncValue.loading(),
-        ) {
-    load();
+  NotificationsController(
+    this._ref,
+    this._repository, {
+    required bool shouldLoad,
+  }) : _shouldLoad = shouldLoad,
+       super(const AsyncValue.loading()) {
+    if (_shouldLoad) {
+      load();
+    }
   }
 
   final Ref _ref;
   final NotificationsRepository _repository;
+  final bool _shouldLoad;
 
-  Future<void> load({
-    bool onlyUnread = false,
-  }) async {
+  Future<void> load({bool onlyUnread = false}) async {
+    if (!_shouldLoad) {
+      return;
+    }
     state = const AsyncValue.loading();
     try {
-      final items = await _repository.getNotifications(
-        onlyUnread: onlyUnread,
-      );
+      final items = await _repository.getNotifications(onlyUnread: onlyUnread);
       final unreadCount = await _repository.getUnreadCount();
       state = AsyncValue.data(
         NotificationsState(

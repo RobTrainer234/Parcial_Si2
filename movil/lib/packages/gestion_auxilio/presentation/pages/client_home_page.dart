@@ -7,6 +7,9 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../core/widgets/app_card.dart';
 import '../../../../core/widgets/app_page_scaffold.dart';
 import '../../../../core/widgets/app_primary_button.dart';
+import '../../../../core/widgets/app_theme_toggle_button.dart';
+import '../../../../core/widgets/app_user_mini_profile.dart';
+import '../../../seguridad_usuarios/data/models/profile_me_model.dart';
 import '../../../seguridad_usuarios/presentation/controllers/profile_controller.dart';
 import '../controllers/notifications_controller.dart';
 
@@ -14,9 +17,9 @@ class ClientHomePage extends ConsumerWidget {
   const ClientHomePage({super.key});
 
   void _showMessage(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -25,22 +28,18 @@ class ClientHomePage extends ConsumerWidget {
     final dangerColor = theme.colorScheme.error;
     final profileState = ref.watch(profileControllerProvider);
     final unreadCountAsync = ref.watch(unreadNotificationsCountProvider);
+    final session = ref.watch(authControllerProvider).valueOrNull;
     final vehicleCount = profileState.valueOrNull?.vehicles.length ?? 0;
 
     return AppPageScaffold(
       label: 'CENTRO DE CONTROL',
-      title: 'Inicio Cliente',
-      subtitle: 'Accede rápido a las opciones principales de tu asistencia.',
-      actions: Semantics(
-        button: true,
-        label: 'Perfil',
-        child: Tooltip(
-          message: 'Perfil',
-          child: IconButton(
-            onPressed: () => context.push(AppRoutes.profile),
-            icon: const Icon(Icons.person_rounded, size: 20),
-          ),
-        ),
+      title: 'Inicio cliente',
+      subtitle: 'Accede rapido a las opciones principales de tu asistencia.',
+      actions: _ClientHeaderActions(
+        profile: profileState.valueOrNull,
+        fallbackEmail: session?.user?.email,
+        unreadCount: unreadCountAsync.valueOrNull,
+        onOpenProfile: () => context.push(AppRoutes.profile),
       ),
       child: ListView(
         children: [
@@ -55,7 +54,9 @@ class ClientHomePage extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: 0.12,
+                        ),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Icon(
@@ -70,14 +71,14 @@ class ClientHomePage extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '¿Necesitas auxilio?',
+                            'Necesitas auxilio?',
                             style: theme.textTheme.titleLarge?.copyWith(
                               color: theme.colorScheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Reporta una falla y solicita asistencia cuando tu vehículo lo necesite.',
+                            'Reporta una falla y solicita asistencia cuando tu vehiculo lo necesite.',
                             style: theme.textTheme.bodyLarge,
                           ),
                         ],
@@ -93,17 +94,17 @@ class ClientHomePage extends ConsumerWidget {
                     if (profileState.isLoading) {
                       _showMessage(
                         context,
-                        'Estamos cargando tus vehículos. Intenta nuevamente en unos segundos.',
+                        'Estamos cargando tus vehiculos. Intenta nuevamente en unos segundos.',
                       );
                     } else if (profileState.hasError) {
                       _showMessage(
                         context,
-                        'No se pudo verificar tus vehículos. Reintenta desde tu perfil.',
+                        'No se pudo verificar tus vehiculos. Reintenta desde tu perfil.',
                       );
                     } else if (vehicleCount == 0) {
                       _showMessage(
                         context,
-                        'Primero registra un vehículo en tu perfil.',
+                        'Primero registra un vehiculo en tu perfil.',
                       );
                     } else {
                       context.push(AppRoutes.reportIncident);
@@ -121,15 +122,16 @@ class ClientHomePage extends ConsumerWidget {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor:
-                        theme.colorScheme.primary.withValues(alpha: 0.12),
+                    backgroundColor: theme.colorScheme.primary.withValues(
+                      alpha: 0.12,
+                    ),
                     foregroundColor: theme.colorScheme.primary,
                     child: const Icon(Icons.directions_car_rounded, size: 22),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Text(
-                      'Cargando tus vehículos...',
+                      'Cargando tus vehiculos...',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -149,8 +151,9 @@ class ClientHomePage extends ConsumerWidget {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor:
-                        theme.colorScheme.error.withValues(alpha: 0.12),
+                    backgroundColor: theme.colorScheme.error.withValues(
+                      alpha: 0.12,
+                    ),
                     foregroundColor: theme.colorScheme.error,
                     child: const Icon(Icons.error_outline_rounded, size: 22),
                   ),
@@ -173,13 +176,17 @@ class ClientHomePage extends ConsumerWidget {
               final count = profile.vehicles.length;
               return AppCard(
                 onTap: () => context.push(AppRoutes.profile),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 16,
+                ),
                 child: Row(
                   children: [
                     CircleAvatar(
                       radius: 22,
-                      backgroundColor:
-                          theme.colorScheme.primary.withValues(alpha: 0.12),
+                      backgroundColor: theme.colorScheme.primary.withValues(
+                        alpha: 0.12,
+                      ),
                       foregroundColor: theme.colorScheme.primary,
                       child: const Icon(Icons.directions_car_rounded, size: 22),
                     ),
@@ -189,17 +196,18 @@ class ClientHomePage extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Vehículos registrados',
+                            'Vehiculos registrados',
                             style: theme.textTheme.titleMedium,
                           ),
                           const SizedBox(height: 4),
                           Text(
                             count == 0
-                                ? 'Agrega un vehículo antes de reportar un incidente.'
-                                : '$count vehículo${count == 1 ? '' : 's'}',
+                                ? 'Agrega un vehiculo antes de reportar un incidente.'
+                                : '$count vehiculo${count == 1 ? '' : 's'}',
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color:
-                                  count == 0 ? theme.colorScheme.error : null,
+                              color: count == 0
+                                  ? theme.colorScheme.error
+                                  : null,
                             ),
                           ),
                         ],
@@ -247,22 +255,62 @@ class ClientHomePage extends ConsumerWidget {
             onTap: () => context.push(AppRoutes.notifications),
           ),
           const SizedBox(height: 12),
-          Consumer(
-            builder: (context, ref, child) {
-              final authController = ref.watch(authControllerProvider.notifier);
-              return _HomeActionCard(
-                title: 'Cerrar sesión',
-                subtitle: 'Salir de tu cuenta en este dispositivo.',
-                icon: Icons.logout_rounded,
-                accentColor: dangerColor,
-                onTap: () async {
-                  await authController.logout();
-                  if (context.mounted) {
-                    context.go(AppRoutes.login);
-                  }
-                },
-              );
+          _HomeActionCard(
+            title: 'Cerrar sesion',
+            subtitle: 'Salir de tu cuenta en este dispositivo.',
+            icon: Icons.logout_rounded,
+            accentColor: dangerColor,
+            onTap: () async {
+              await ref.read(authControllerProvider.notifier).logout();
+              if (context.mounted) {
+                context.go(AppRoutes.login);
+              }
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClientHeaderActions extends StatelessWidget {
+  const _ClientHeaderActions({
+    required this.profile,
+    required this.fallbackEmail,
+    required this.unreadCount,
+    required this.onOpenProfile,
+  });
+
+  final ProfileMeModel? profile;
+  final String? fallbackEmail;
+  final int? unreadCount;
+  final VoidCallback onOpenProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 184,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          AppUserMiniProfile(
+            title: _clientName(profile, fallbackEmail),
+            subtitle: _clientSubtitle(profile),
+            badgeCount: unreadCount,
+            icon: Icons.person_pin_circle_rounded,
+            onTap: onOpenProfile,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppThemeToggleButton(),
+              IconButton(
+                tooltip: 'Perfil',
+                onPressed: onOpenProfile,
+                icon: const Icon(Icons.person_rounded, size: 20),
+              ),
+            ],
           ),
         ],
       ),
@@ -316,10 +364,7 @@ class _HomeActionCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  subtitle,
-                  style: theme.textTheme.bodyMedium,
-                ),
+                Text(subtitle, style: theme.textTheme.bodyMedium),
               ],
             ),
           ),
@@ -339,4 +384,22 @@ class _HomeActionCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _clientName(ProfileMeModel? profile, String? fallbackEmail) {
+  if (profile != null) {
+    return '${profile.persona.nombre} ${profile.persona.apellido}'.trim();
+  }
+  if (fallbackEmail != null && fallbackEmail.trim().isNotEmpty) {
+    return fallbackEmail.trim();
+  }
+  return 'Conductor';
+}
+
+String _clientSubtitle(ProfileMeModel? profile) {
+  if (profile == null || profile.vehicles.isEmpty) {
+    return 'Conductor';
+  }
+  final vehicle = profile.vehicles.first;
+  return '${vehicle.marcaNombre} ${vehicle.modeloNombre}';
 }

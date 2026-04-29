@@ -11,8 +11,12 @@ import '../../../../core/widgets/app_empty_view.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/app_page_scaffold.dart';
-import '../controllers/operator_services_controller.dart';
+import '../../../../core/widgets/app_theme_toggle_button.dart';
+import '../../../../core/widgets/app_user_mini_profile.dart';
+import '../../../seguridad_usuarios/data/models/profile_me_model.dart';
+import '../../../seguridad_usuarios/presentation/controllers/profile_controller.dart';
 import '../../data/models/operator_assigned_service_model.dart';
+import '../controllers/operator_services_controller.dart';
 
 class OperatorHomePage extends ConsumerWidget {
   const OperatorHomePage({super.key});
@@ -20,50 +24,41 @@ class OperatorHomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(operatorServicesProvider);
+    final currentItems =
+        state.valueOrNull ?? const <OperatorAssignedServiceModel>[];
+    final hasOperationalServices = currentItems.any(
+      (item) => _isOperationalState(item),
+    );
 
     return AppPageScaffold(
       label: 'OPERARIO',
       title: 'Servicios asignados',
       subtitle: 'Atiende las asistencias asignadas por tu taller.',
-      actions: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: 'Actualizar',
-            onPressed: () =>
-                ref.read(operatorServicesProvider.notifier).refresh(),
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-          IconButton(
-            tooltip: 'Cerrar sesion',
-            onPressed: () async {
-              await ref.read(authControllerProvider.notifier).logout();
-              if (context.mounted) {
-                context.go(AppRoutes.login);
-              }
-            },
-            icon: const Icon(Icons.logout_rounded),
-          ),
-        ],
+      actions: _OperatorHeaderActions(
+        hasOperationalServices: hasOperationalServices,
       ),
       child: state.when(
-        loading: () => const AppLoading(message: 'Cargando servicios asignados...'),
+        loading: () =>
+            const AppLoading(message: 'Cargando servicios asignados...'),
         error: (error, _) => AppErrorView(
           message: _mapOperatorHomeError(error),
           onRetry: () => ref.read(operatorServicesProvider.notifier).refresh(),
         ),
         data: (items) {
           final operational = items.where(_isOperationalState).toList();
-          final closed = items.where((item) => !_isOperationalState(item)).toList();
+          final closed = items
+              .where((item) => !_isOperationalState(item))
+              .toList();
 
           if (items.isEmpty) {
             return const AppEmptyView(
-              message: 'No tienes servicios asignados en este momento.',
+              message: 'Por ahora no tienes servicios asignados para atender.',
             );
           }
 
           return RefreshIndicator(
-            onRefresh: () => ref.read(operatorServicesProvider.notifier).refresh(),
+            onRefresh: () =>
+                ref.read(operatorServicesProvider.notifier).refresh(),
             child: ListView(
               children: [
                 Text(
@@ -72,17 +67,20 @@ class OperatorHomePage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 if (operational.isEmpty)
-                  const AppEmptyView(
-                    message: 'No tienes servicios operativos pendientes en este momento.',
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      'Por ahora no tienes servicios asignados para atender.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   )
                 else
-                  ...operational.map((item) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _OperatorServiceCard(
-                          item: item,
-                          closed: false,
-                        ),
-                      )),
+                  ...operational.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _OperatorServiceCard(item: item, closed: false),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 Text(
                   'Servicios cerrados',
@@ -90,17 +88,20 @@ class OperatorHomePage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 if (closed.isEmpty)
-                  const AppEmptyView(
-                    message: 'No tienes servicios cerrados recientes.',
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      'No tienes servicios cerrados recientes.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   )
                 else
-                  ...closed.map((item) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _OperatorServiceCard(
-                          item: item,
-                          closed: true,
-                        ),
-                      )),
+                  ...closed.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _OperatorServiceCard(item: item, closed: true),
+                    ),
+                  ),
               ],
             ),
           );
@@ -110,11 +111,58 @@ class OperatorHomePage extends ConsumerWidget {
   }
 }
 
+class _OperatorHeaderActions extends ConsumerWidget {
+  const _OperatorHeaderActions({required this.hasOperationalServices});
+
+  final bool hasOperationalServices;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(profileControllerProvider).valueOrNull;
+    final session = ref.watch(authControllerProvider).valueOrNull;
+
+    return SizedBox(
+      width: 184,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          AppUserMiniProfile(
+            title: _operatorName(profile, session?.user?.email),
+            subtitle: _operatorSpecialties(profile),
+            status: hasOperationalServices ? 'En servicio' : 'Disponible',
+            icon: Icons.local_shipping_rounded,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppThemeToggleButton(),
+              IconButton(
+                tooltip: 'Actualizar',
+                onPressed: () =>
+                    ref.read(operatorServicesProvider.notifier).refresh(),
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+              IconButton(
+                tooltip: 'Cerrar sesion',
+                onPressed: () async {
+                  await ref.read(authControllerProvider.notifier).logout();
+                  if (context.mounted) {
+                    context.go(AppRoutes.login);
+                  }
+                },
+                icon: const Icon(Icons.logout_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OperatorServiceCard extends StatelessWidget {
-  const _OperatorServiceCard({
-    required this.item,
-    required this.closed,
-  });
+  const _OperatorServiceCard({required this.item, required this.closed});
 
   final OperatorAssignedServiceModel item;
   final bool closed;
@@ -145,10 +193,7 @@ class _OperatorServiceCard extends StatelessWidget {
               value: localizeStatusLabel(item.severity),
             ),
           if (item.aiSummary != null && item.aiSummary!.trim().isNotEmpty)
-            _InfoRow(
-              label: 'Resumen IA',
-              value: item.aiSummary!,
-            ),
+            _InfoRow(label: 'Resumen IA', value: item.aiSummary!),
           if (item.prequotationMin != null && item.prequotationMax != null)
             _InfoRow(
               label: 'Pre-cotizacion',
@@ -157,15 +202,12 @@ class _OperatorServiceCard extends StatelessWidget {
             ),
           if (closed) ...[
             const SizedBox(height: 8),
-            const Text(
-              'El servicio ya fue cerrado operativamente.',
-            ),
+            const Text('El servicio ya fue cerrado operativamente.'),
           ],
           const SizedBox(height: 12),
           OutlinedButton(
-            onPressed: () => context.push(
-              AppRoutes.operatorServicePath(item.serviceId),
-            ),
+            onPressed: () =>
+                context.push(AppRoutes.operatorServicePath(item.serviceId)),
             child: const Text('Ver servicio'),
           ),
         ],
@@ -249,11 +291,35 @@ String _friendlyOperatorState(String state) {
   }
 }
 
+String _operatorName(ProfileMeModel? profile, String? email) {
+  if (profile != null) {
+    return '${profile.persona.nombre} ${profile.persona.apellido}'.trim();
+  }
+  if (email != null && email.trim().isNotEmpty) {
+    return email.trim();
+  }
+  return 'Operario';
+}
+
+String _operatorSpecialties(ProfileMeModel? profile) {
+  if (profile == null) {
+    return 'Cargando especialidades...';
+  }
+  final names = profile.specialties
+      .map((item) => item.nombre.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
+  if (names.isEmpty) {
+    return 'Operario del taller';
+  }
+  if (names.length <= 2) {
+    return names.join(', ');
+  }
+  return '${names.take(2).join(', ')} +${names.length - 2}';
+}
+
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   final String label;
   final String value;
