@@ -2,18 +2,44 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import socket
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib import error, parse, request
+from urllib import error, request
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.core.config import get_settings
 
 
+GROQ_CHAT_COMPLETIONS_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+MAX_PROVIDER_RESPONSE_EXCERPT_CHARS = 1000
+MAX_PROVIDER_IMAGES = 5
+
+
 class TriageProviderError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status_code: int | None = None,
+        provider_response_excerpt: str | None = None,
+        provider_name: str | None = None,
+        model_name: str | None = None,
+        image_count: int | None = None,
+        audio_included: bool | None = None,
+        audio_omitted_reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.http_status_code = http_status_code
+        self.provider_response_excerpt = provider_response_excerpt
+        self.provider_name = provider_name
+        self.model_name = model_name
+        self.image_count = image_count
+        self.audio_included = audio_included
+        self.audio_omitted_reason = audio_omitted_reason
 
 
 class TriageProviderNotConfiguredError(TriageProviderError):
@@ -74,55 +100,30 @@ class NormalizedTriageAIResult(BaseModel):
         normalized = " ".join(value.split())
         return normalized or None
 
+    @field_validator("transcripcion_audio")
+    @classmethod
+    def enforce_audio_null(cls, value: str | None) -> str | None:
+        if value is not None:
+            raise ValueError("Audio transcription is not supported in Groq triage.")
+        return value
 
-def _triage_response_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": [
-            "resumen",
-            "severidad",
-            "especialidad_detectada_nombre",
-            "confianza",
-            "transcripcion_audio",
-            "etiquetas_imagen",
-            "herramientas_sugeridas",
-            "requiere_grua",
-            "observaciones",
-        ],
-        "properties": {
-            "resumen": {
-                "type": "string",
-                "description": "Resumen tecnico preliminar del incidente.",
-            },
-            "severidad": {
-                "type": "string",
-                "enum": ["BAJA", "MEDIA", "ALTA", "CRITICA"],
-            },
-            "especialidad_detectada_nombre": {
-                "type": ["string", "null"],
-                "description": "Uno de los nombres de especialidad permitidos o null si no hay certeza.",
-            },
-            "confianza": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 100,
-            },
-            "transcripcion_audio": {
-                "type": ["string", "null"],
-            },
-            "etiquetas_imagen": {
-                "type": ["array", "object", "null"],
-                "items": {"type": "string"},
-            },
-            "herramientas_sugeridas": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-            "requiere_grua": {"type": "boolean"},
-            "observaciones": {"type": ["string", "null"]},
-        },
-    }
+    @field_validator("confianza", mode="before")
+    @classmethod
+    def normalize_confidence_scale(cls, value: Any) -> Decimal:
+        try:
+            confidence = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError("Confidence must be numeric.") from exc
+
+        if confidence < Decimal("0"):
+            raise ValueError("Confidence must be between 0 and 100.")
+        if confidence == Decimal("0"):
+            return confidence
+        if confidence <= Decimal("1"):
+            confidence *= Decimal("100")
+        if confidence > Decimal("100"):
+            raise ValueError("Confidence must be between 0 and 100.")
+        return confidence
 
 
 def _build_triage_prompt(
@@ -130,88 +131,135 @@ def _build_triage_prompt(
     description: str,
     reported_specialty_name: str,
     specialty_names: list[str],
-    has_audio: bool,
     image_count: int,
 ) -> str:
+    allowed_specialties = ", ".join(specialty_names)
     return (
         "Eres un clasificador tecnico preliminar para auxilio vehicular. "
-        "Analiza descripcion, audio e imagenes si existen y responde SOLO JSON valido. "
-        "No inventes datos no observables. "
-        "La especialidad detectada debe ser exactamente uno de estos nombres o null: "
-        f"{', '.join(specialty_names)}. "
-        "Si no hay suficiente certeza, usa confianza baja y especialidad_detectada_nombre null. "
-        f"El cliente reporto inicialmente la especialidad {reported_specialty_name}. "
-        f"Hay audio: {'si' if has_audio else 'no'}. "
-        f"Cantidad de imagenes: {image_count}. "
-        f"Descripcion del cliente: {description}"
+        "Analiza solamente la descripcion del cliente y las imagenes adjuntas. "
+        "No inventes hechos que no esten visibles o descritos. "
+        "La sospecha inicial reportada por el cliente es: "
+        f"{reported_specialty_name}. "
+        f"Especialidades permitidas exactamente como catalogo backend: {allowed_specialties}. "
+        f"Cantidad de imagenes adjuntas: {image_count}. "
+        f"Descripcion del cliente: {description}. "
+        "Debes devolver SOLO un objeto JSON valido, sin markdown y sin texto adicional. "
+        "La clave transcripcion_audio debe ser siempre null porque el audio no se procesa. "
+        "La clave especialidad_detectada_nombre debe ser exactamente uno de los nombres permitidos o null. "
+        "La clave confianza debe ser un numero entre 0 y 100, no entre 0 y 1. "
+        "Ejemplo: usa 90 para 90%, no 0.90. "
+        "Si no estas seguro, usa especialidad_detectada_nombre null, confianza baja y observaciones explicando la incertidumbre. "
+        "Estructura JSON obligatoria: "
+        '{"resumen": string, "severidad": "BAJA" | "MEDIA" | "ALTA" | "CRITICA", '
+        '"especialidad_detectada_nombre": string | null, "confianza": number, '
+        '"transcripcion_audio": null, "etiquetas_imagen": array | object | null, '
+        '"herramientas_sugeridas": array de strings, "requiere_grua": boolean, '
+        '"observaciones": string | null}.'
     )
 
 
-def _extract_text_from_provider_response(response_payload: dict[str, Any]) -> str:
-    candidates = response_payload.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        raise TriageProviderInvalidResponseError("Provider returned no candidates.")
+def _sanitize_provider_error_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    sanitized = re.sub(
+        r"Authorization:\s*Bearer\s+[A-Za-z0-9._\-]+",
+        "Authorization: Bearer [REDACTED]",
+        value,
+        flags=re.IGNORECASE,
+    )
+    sanitized = re.sub(
+        r"Bearer\s+[A-Za-z0-9._\-]+",
+        "Bearer [REDACTED]",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    sanitized = re.sub(r"key=[^&\s]+", "key=[REDACTED]", sanitized, flags=re.IGNORECASE)
+    sanitized = sanitized.replace("\r", " ").replace("\n", " ")
+    sanitized = " ".join(sanitized.split())
+    return sanitized[:MAX_PROVIDER_RESPONSE_EXCERPT_CHARS]
 
-    first_candidate = candidates[0]
-    content = first_candidate.get("content") or {}
-    parts = content.get("parts")
-    if not isinstance(parts, list) or not parts:
-        raise TriageProviderInvalidResponseError("Provider returned no text parts.")
 
-    for part in parts:
-        text = part.get("text")
-        if isinstance(text, str) and text.strip():
-            return text
-
-    raise TriageProviderInvalidResponseError("Provider returned no JSON text.")
-
-
-def _call_gemini_generate_content(
+def _build_groq_content_items(
     *,
+    prompt: str,
+    images: list[AIMediaInput],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for image in images[:MAX_PROVIDER_IMAGES]:
+        data_url = (
+            f"data:{image.mime_type};base64,"
+            f"{base64.b64encode(image.content_bytes).decode('ascii')}"
+        )
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_url,
+                },
+            }
+        )
+    return content
+
+
+def _strip_json_fences(value: str) -> str:
+    stripped = value.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if not lines:
+        return stripped
+    if lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _extract_text_from_provider_response(response_payload: dict[str, Any]) -> str:
+    choices = response_payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise TriageProviderInvalidResponseError("Provider returned no choices.")
+
+    first_choice = choices[0]
+    message = first_choice.get("message") or {}
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return _strip_json_fences(content)
+
+    raise TriageProviderInvalidResponseError("Provider returned no JSON content.")
+
+
+def _call_groq_chat_completion(
+    *,
+    provider_name: str,
     model: str,
     api_key: str,
     timeout_seconds: int,
     prompt: str,
     images: list[AIMediaInput],
-    audio: AIMediaInput | None,
 ) -> dict[str, Any]:
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{parse.quote(model)}:generateContent?key={parse.quote(api_key)}"
-    )
-    parts: list[dict[str, Any]] = [{"text": prompt}]
-    for image in images:
-        parts.append(
-            {
-                "inline_data": {
-                    "mime_type": image.mime_type,
-                    "data": base64.b64encode(image.content_bytes).decode("ascii"),
-                }
-            }
-        )
-    if audio is not None:
-        parts.append(
-            {
-                "inline_data": {
-                    "mime_type": audio.mime_type,
-                    "data": base64.b64encode(audio.content_bytes).decode("ascii"),
-                }
-            }
-        )
-
     request_body = {
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseJsonSchema": _triage_response_schema(),
-            "temperature": 0.2,
-        },
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": _build_groq_content_items(prompt=prompt, images=images),
+            }
+        ],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
     }
     payload_bytes = json.dumps(request_body).encode("utf-8")
     http_request = request.Request(
-        endpoint,
+        GROQ_CHAT_COMPLETIONS_ENDPOINT,
         data=payload_bytes,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "SI2-AuxilioVial/1.0 (+https://localhost)",
+        },
         method="POST",
     )
     try:
@@ -219,11 +267,62 @@ def _call_gemini_generate_content(
             return json.loads(response.read().decode("utf-8"))
     except error.HTTPError as exc:
         response_text = exc.read().decode("utf-8", errors="ignore")
+        sanitized_response = _sanitize_provider_error_text(response_text)
         raise TriageProviderError(
-            f"Gemini request failed with HTTP {exc.code}: {response_text}"
+            f"Groq request failed with HTTP {exc.code}: {sanitized_response or 'No response body.'}",
+            http_status_code=exc.code,
+            provider_response_excerpt=sanitized_response,
+            provider_name=provider_name,
+            model_name=model,
+            image_count=min(len(images), MAX_PROVIDER_IMAGES),
+            audio_included=False,
+        ) from exc
+    except socket.timeout as exc:
+        raise TriageProviderError(
+            "Groq request timed out.",
+            provider_name=provider_name,
+            model_name=model,
+            image_count=min(len(images), MAX_PROVIDER_IMAGES),
+            audio_included=False,
         ) from exc
     except error.URLError as exc:
-        raise TriageProviderError("Gemini request failed.") from exc
+        reason = getattr(exc, "reason", None)
+        if reason:
+            raise TriageProviderError(
+                f"Groq request failed: {reason}",
+                provider_name=provider_name,
+                model_name=model,
+                image_count=min(len(images), MAX_PROVIDER_IMAGES),
+                audio_included=False,
+            ) from exc
+        raise TriageProviderError(
+            "Groq request failed.",
+            provider_name=provider_name,
+            model_name=model,
+            image_count=min(len(images), MAX_PROVIDER_IMAGES),
+            audio_included=False,
+        ) from exc
+
+
+def _get_triage_provider_settings() -> tuple[str, str, str]:
+    settings = get_settings()
+    provider_name = (settings.triage_ai_provider or "").strip().lower()
+    if not provider_name:
+        raise TriageProviderNotConfiguredError("Missing TRIAGE_AI_PROVIDER setting.")
+    if provider_name != "groq":
+        raise TriageProviderNotConfiguredError(
+            f"Unsupported TRIAGE_AI_PROVIDER setting: {settings.triage_ai_provider!r}."
+        )
+
+    model_name = (settings.triage_ai_model or "").strip()
+    if not model_name:
+        raise TriageProviderNotConfiguredError("Missing TRIAGE_AI_MODEL setting.")
+
+    api_key = (settings.triage_ai_api_key or "").strip()
+    if not api_key:
+        raise TriageProviderNotConfiguredError("Missing TRIAGE_AI_API_KEY setting.")
+
+    return provider_name, model_name, api_key
 
 
 def run_multimodal_triage(
@@ -235,49 +334,34 @@ def run_multimodal_triage(
     audio: AIMediaInput | None,
 ) -> tuple[NormalizedTriageAIResult, dict[str, Any]]:
     settings = get_settings()
-    if settings.triage_ai_provider.lower() != "gemini":
-        raise TriageProviderNotConfiguredError("Configured triage AI provider is not supported.")
-    if not settings.triage_ai_api_key:
-        raise TriageProviderNotConfiguredError("Triage AI provider is not configured.")
+    provider_name, model_name, api_key = _get_triage_provider_settings()
 
     prompt = _build_triage_prompt(
         description=description,
         reported_specialty_name=reported_specialty_name,
         specialty_names=specialty_names,
-        has_audio=audio is not None,
-        image_count=len(images),
+        image_count=min(len(images), MAX_PROVIDER_IMAGES),
     )
 
     provider_metadata: dict[str, Any] = {
-        "provider": settings.triage_ai_provider,
-        "model": settings.triage_ai_model,
-        "audio_included": audio is not None,
-        "image_count": len(images),
+        "provider": provider_name,
+        "model": model_name,
+        "audio_included": False,
+        "image_count": min(len(images), MAX_PROVIDER_IMAGES),
     }
-
-    try:
-        provider_response = _call_gemini_generate_content(
-            model=settings.triage_ai_model,
-            api_key=settings.triage_ai_api_key,
-            timeout_seconds=settings.triage_ai_timeout_seconds,
-            prompt=prompt,
-            images=images,
-            audio=audio,
+    if audio is not None:
+        provider_metadata["audio_omitted_reason"] = (
+            "audio_not_supported_in_current_groq_triage"
         )
-    except TriageProviderError:
-        if audio is not None:
-            provider_response = _call_gemini_generate_content(
-                model=settings.triage_ai_model,
-                api_key=settings.triage_ai_api_key,
-                timeout_seconds=settings.triage_ai_timeout_seconds,
-                prompt=prompt,
-                images=images,
-                audio=None,
-            )
-            provider_metadata["audio_included"] = False
-            provider_metadata["audio_omitted_reason"] = "provider_retry_without_audio"
-        else:
-            raise
+
+    provider_response = _call_groq_chat_completion(
+        provider_name=provider_name,
+        model=model_name,
+        api_key=api_key,
+        timeout_seconds=settings.triage_ai_timeout_seconds,
+        prompt=prompt,
+        images=images,
+    )
 
     response_text = _extract_text_from_provider_response(provider_response)
     try:

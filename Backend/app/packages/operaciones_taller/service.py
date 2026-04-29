@@ -15,6 +15,7 @@ from app.models import (
     Bitacora,
     Calificacion,
     CatalogoServicioTaller,
+    Cliente,
     Evidencia,
     Especialidad,
     Incidente,
@@ -57,6 +58,8 @@ from .schemas import (
     StaffSpecialtyResponse,
     UsedSparePartResponse,
     WaitingAssignmentServiceSummary,
+    WorkshopServiceHistoryDetailResponse,
+    WorkshopServiceHistorySummary,
     WorkshopRequestDecisionRequest,
     WorkshopRequestDecisionResponse,
     WorkshopRequestDetailResponse,
@@ -133,6 +136,17 @@ DASHBOARD_COMPLETED_SERVICE_STATES = {
     "FINALIZADO_PENDIENTE_PAGO",
     "PAGADO",
 }
+WORKSHOP_SERVICE_HISTORY_STATES = {
+    "EN_ESPERA_ASIGNACION",
+    "ASIGNADO",
+    "EN_CAMINO",
+    "EN_SITIO",
+    "EN_DIAGNOSTICO_FISICO",
+    "EN_REPARACION",
+    "COMPLETADO_PENDIENTE_CONFIRMACION",
+    "FINALIZADO_PENDIENTE_PAGO",
+    "PAGADO",
+}
 DASHBOARD_STUCK_THRESHOLDS_MINUTES: dict[str, int] = {
     "EN_ESPERA_ASIGNACION": 30,
     "ASIGNADO": 30,
@@ -165,6 +179,25 @@ def _build_service_query():
         .joinedload(SolicitudServicio.incidente)
         .joinedload(Incidente.especialidad_reportada_cliente),
         joinedload(Servicio.operario).joinedload(Operario.persona),
+    )
+
+
+def _build_service_history_query():
+    return select(Servicio).options(
+        joinedload(Servicio.solicitud)
+        .joinedload(SolicitudServicio.taller),
+        joinedload(Servicio.solicitud)
+        .joinedload(SolicitudServicio.incidente)
+        .joinedload(Incidente.especialidad_detectada),
+        joinedload(Servicio.solicitud)
+        .joinedload(SolicitudServicio.incidente)
+        .joinedload(Incidente.cliente)
+        .joinedload(Cliente.persona),
+        joinedload(Servicio.operario).joinedload(Operario.persona),
+        joinedload(Servicio.pago),
+        joinedload(Servicio.informe),
+        selectinload(Servicio.calificaciones),
+        selectinload(Servicio.evidencias),
     )
 
 
@@ -1452,6 +1485,138 @@ def _build_repair_snapshot(service: Servicio) -> RepairReportSnapshotResponse:
         used_items=used_items,
         final_evidences=final_evidences,
         saved_at=saved_at,
+    )
+
+
+def _validate_history_filters(
+    *,
+    desde: datetime | None,
+    hasta: datetime | None,
+    limit: int,
+    offset: int,
+) -> None:
+    if limit <= 0 or limit > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="limit must be between 1 and 200.",
+        )
+    if offset < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="offset must be greater than or equal to 0.",
+        )
+    if desde is not None and hasta is not None and hasta < desde:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="hasta must be greater than or equal to desde.",
+        )
+
+
+def _build_client_full_name(service: Servicio) -> str | None:
+    cliente = service.solicitud.incidente.cliente
+    persona = cliente.persona if cliente is not None else None
+    if persona is None:
+        return None
+    return f"{persona.nombre} {persona.apellido}".strip()
+
+
+def _build_operario_full_name(service: Servicio) -> str | None:
+    operario = service.operario
+    persona = operario.persona if operario is not None else None
+    if persona is None:
+        return None
+    return f"{persona.nombre} {persona.apellido}".strip()
+
+
+def _build_latest_rating_comment(service: Servicio) -> str | None:
+    ratings = sorted(
+        service.calificaciones,
+        key=lambda item: (item.fecha, item.id_calificacion),
+        reverse=True,
+    )
+    for rating in ratings:
+        if rating.comentario is not None and rating.comentario.strip():
+            return rating.comentario.strip()
+    return None
+
+
+def _build_service_rating_average(service: Servicio) -> Decimal | None:
+    if not service.calificaciones:
+        return None
+    values = [Decimal(item.estrellas) for item in service.calificaciones]
+    return _quantize_currency(sum(values) / Decimal(len(values)))
+
+
+def _resolve_service_completed_at(service: Servicio) -> datetime | None:
+    if service.fecha_fin is not None:
+        return service.fecha_fin
+    if service.informe is not None:
+        return service.informe.updated_at or service.informe.fecha_registro
+    return None
+
+
+def _resolve_service_final_amount(service: Servicio) -> Decimal | None:
+    if service.pago is not None:
+        return Decimal(service.pago.monto)
+    if service.costo_total is not None:
+        return Decimal(service.costo_total)
+    return None
+
+
+def _build_workshop_service_history_summary(
+    *,
+    service: Servicio,
+) -> WorkshopServiceHistorySummary:
+    incident = service.solicitud.incidente
+    return WorkshopServiceHistorySummary(
+        service_id=service.id_servicio,
+        request_id=service.id_solicitud,
+        incident_id=incident.id_incidente,
+        service_state=service.estado,
+        incident_state=incident.estado,
+        specialty=incident.especialidad_detectada.nombre if incident.especialidad_detectada is not None else None,
+        ai_summary=incident.diagnostico_ia_resumen,
+        client_name=_build_client_full_name(service),
+        operario_id=service.id_persona_operario,
+        operario_name=_build_operario_full_name(service),
+        workshop_name=service.solicitud.taller.nombre_comercial,
+        prequotation_code=service.codigo_precotizacion,
+        estimated_min=service.monto_precotizado_min,
+        estimated_max=service.monto_precotizado_max,
+        final_amount=_resolve_service_final_amount(service),
+        payment_status=service.pago.estado if service.pago is not None else None,
+        rating_average=_build_service_rating_average(service),
+        rating_comment=_build_latest_rating_comment(service),
+        created_at=service.created_at,
+        assigned_at=service.fecha_asignacion_operario,
+        completed_at=_resolve_service_completed_at(service),
+        paid_at=service.pago.fecha_confirmacion if service.pago is not None else None,
+    )
+
+
+def _build_workshop_service_history_detail(
+    *,
+    service: Servicio,
+) -> WorkshopServiceHistoryDetailResponse:
+    summary = _build_workshop_service_history_summary(service=service)
+    incident = service.solicitud.incidente
+    observaciones, recomendaciones = _decode_report_notes(
+        service.informe.observaciones if service.informe is not None else None
+    )
+    final_evidence_count = len(_get_final_service_evidences(service))
+    return WorkshopServiceHistoryDetailResponse(
+        **summary.model_dump(),
+        client_description=incident.descripcion_cliente,
+        incident_reference=incident.transcripcion_audio,
+        detected_specialty=summary.specialty,
+        operario_availability=service.operario.estado_disponibilidad if service.operario is not None else None,
+        payment_amount=Decimal(service.pago.monto) if service.pago is not None else None,
+        payment_currency=service.pago.moneda if service.pago is not None else None,
+        trabajo_realizado=service.informe.accion_realizada if service.informe is not None else None,
+        diagnostico_fisico=service.informe.diagnostico_fisico if service.informe is not None else None,
+        observaciones=observaciones,
+        recomendaciones=recomendaciones,
+        final_evidence_count=final_evidence_count,
     )
 
 
@@ -3277,6 +3442,79 @@ def get_workshop_request_detail(
 
     is_expired = request_row.estado == "EXPIRADA"
     return _serialize_request_detail(request_row, is_expired=is_expired, db=db)
+
+
+def list_workshop_service_history(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    estado: str | None = None,
+    desde: datetime | None = None,
+    hasta: datetime | None = None,
+    operario_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[WorkshopServiceHistorySummary]:
+    _validate_history_filters(
+        desde=desde,
+        hasta=hasta,
+        limit=limit,
+        offset=offset,
+    )
+
+    query = (
+        _build_service_history_query()
+        .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+        .where(
+            SolicitudServicio.id_taller == admin_context.workshop_id,
+            Servicio.estado.in_(WORKSHOP_SERVICE_HISTORY_STATES),
+        )
+    )
+
+    normalized_state = estado.strip().upper() if estado is not None and estado.strip() else None
+    if normalized_state is not None:
+        query = query.where(Servicio.estado == normalized_state)
+    if desde is not None:
+        query = query.where(Servicio.created_at >= desde)
+    if hasta is not None:
+        query = query.where(Servicio.created_at <= hasta)
+    if operario_id is not None:
+        query = query.where(Servicio.id_persona_operario == operario_id)
+
+    services = list(
+        db.scalars(
+            query.order_by(Servicio.updated_at.desc(), Servicio.id_servicio.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return [
+        _build_workshop_service_history_summary(service=service)
+        for service in services
+    ]
+
+
+def get_workshop_service_history_detail(
+    *,
+    service_id: int,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+) -> WorkshopServiceHistoryDetailResponse:
+    service = db.scalar(
+        _build_service_history_query()
+        .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+        .where(
+            Servicio.id_servicio == service_id,
+            SolicitudServicio.id_taller == admin_context.workshop_id,
+            Servicio.estado.in_(WORKSHOP_SERVICE_HISTORY_STATES),
+        )
+    )
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workshop service history detail not found.",
+        )
+    return _build_workshop_service_history_detail(service=service)
 
 
 def list_waiting_assignment_services(

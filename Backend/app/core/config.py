@@ -77,9 +77,12 @@ def get_settings() -> Settings:
         lockout_minutes=int(os.getenv("LOCKOUT_MINUTES", "5")),
         storage_backend=os.getenv("STORAGE_BACKEND", "local"),
         local_media_root=Path(os.getenv("LOCAL_MEDIA_ROOT", str(BACKEND_DIR / "media"))),
-        triage_ai_provider=os.getenv("TRIAGE_AI_PROVIDER", "gemini"),
+        triage_ai_provider=os.getenv("TRIAGE_AI_PROVIDER", "groq"),
         triage_ai_api_key=os.getenv("TRIAGE_AI_API_KEY"),
-        triage_ai_model=os.getenv("TRIAGE_AI_MODEL", "gemini-2.0-flash"),
+        triage_ai_model=os.getenv(
+            "TRIAGE_AI_MODEL",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+        ),
         triage_auto_run_after_report=_get_bool_env(
             "TRIAGE_AUTO_RUN_AFTER_REPORT",
             default=False,

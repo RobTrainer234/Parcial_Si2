@@ -56,6 +56,7 @@ settings = get_settings()
 PAYABLE_SERVICE_STATE = "FINALIZADO_PENDIENTE_PAGO"
 PAID_SERVICE_STATE = "PAGADO"
 SUBSCRIPTION_DEFAULT_DURATION_DAYS = 365
+CASH_METHOD_NAMES = {"EFECTIVO", "CASH"}
 
 
 def _build_service_query():
@@ -469,6 +470,148 @@ def _get_payable_amount(service: Servicio) -> Decimal:
     return amount_decimal
 
 
+def _is_cash_payment_method(method: MetodoPago) -> bool:
+    return method.nombre.strip().upper() in CASH_METHOD_NAMES
+
+
+def _build_paid_payment_response(
+    *,
+    payment: Pago,
+    service: Servicio,
+    message: str,
+) -> PaymentInitiationResponse:
+    method_name = payment.metodo.nombre if payment.metodo is not None else ""
+    return PaymentInitiationResponse(
+        payment_id=payment.id_pago,
+        payment_status=payment.estado,
+        amount=Decimal(payment.monto),
+        method=method_name,
+        qr_payload=(payment.payload_pasarela or {}).get("qr_payload")
+        if isinstance(payment.payload_pasarela, dict)
+        else None,
+        qr_url=payment.qr_url,
+        payment_url=(payment.payload_pasarela or {}).get("payment_url")
+        if isinstance(payment.payload_pasarela, dict)
+        else None,
+        expires_at=None,
+        provider_reference=payment.referencia_externa,
+        message=message,
+    )
+
+
+def _confirm_cash_payment(
+    *,
+    service: Servicio,
+    payment: Pago,
+    method: MetodoPago,
+    amount: Decimal,
+    current_user: Usuario,
+    db: Session,
+) -> PaymentInitiationResponse:
+    confirmed_at = utc_now()
+    payment.id_metodo = method.id_metodo
+    payment.metodo = method
+    payment.monto = amount
+    payment.estado = "CONFIRMADO"
+    payment.fecha_confirmacion = confirmed_at
+    payment.referencia_externa = None
+    payment.token_pago = None
+    payment.qr_url = None
+    payment.payload_pasarela = {
+        "payment_mode": "OFFLINE_CASH",
+        "method_name": method.nombre,
+        "confirmed_at": confirmed_at.isoformat(),
+    }
+    service.estado = PAID_SERVICE_STATE
+
+    db.add(
+        _create_payment_bitacora(
+            user=current_user,
+            service=service,
+            action="PAGO_EFECTIVO_CONFIRMADO",
+            description="El cliente registro el pago en efectivo del servicio.",
+            payment=payment,
+            payload={
+                "previous_state": PAYABLE_SERVICE_STATE,
+                "new_state": service.estado,
+                "payment_state": payment.estado,
+                "id_metodo_pago": method.id_metodo,
+                "method_name": method.nombre,
+                "monto": f"{Decimal(payment.monto):.2f}",
+                "confirmed_at": confirmed_at.isoformat(),
+            },
+        )
+    )
+    db.add(
+        _create_payment_bitacora(
+            user=current_user,
+            service=service,
+            action="SERVICIO_PAGADO",
+            description="El servicio paso al estado PAGADO tras registrar el pago en efectivo.",
+            payment=payment,
+            payload={
+                "new_state": service.estado,
+                "payment_state": payment.estado,
+                "id_metodo_pago": method.id_metodo,
+                "method_name": method.nombre,
+            },
+        )
+    )
+
+    client_user = _get_user_by_persona_id(
+        db,
+        persona_id=service.solicitud.incidente.id_cliente,
+    )
+    if client_user is not None:
+        _create_notification(
+            db=db,
+            user=client_user,
+            service=service,
+            title="Pago registrado",
+            message="Tu pago en efectivo fue registrado correctamente.",
+            payload={
+                "service_id": service.id_servicio,
+                "payment_id": payment.id_pago,
+                "payment_state": payment.estado,
+                "service_state": service.estado,
+                "method": method.nombre,
+            },
+        )
+    for admin_user in _get_workshop_admin_users(
+        db,
+        workshop_id=service.solicitud.id_taller,
+    ):
+        _create_notification(
+            db=db,
+            user=admin_user,
+            service=service,
+            title="Pago en efectivo registrado",
+            message=f"El servicio {service.id_servicio} fue marcado como pagado en efectivo.",
+            payload={
+                "service_id": service.id_servicio,
+                "payment_id": payment.id_pago,
+                "payment_state": payment.estado,
+                "service_state": service.estado,
+                "method": method.nombre,
+            },
+        )
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Payment could not be persisted.",
+        ) from exc
+
+    return _build_paid_payment_response(
+        payment=payment,
+        service=service,
+        message="Cash payment registered successfully.",
+    )
+
+
 def get_payment_summary(
     *,
     service_id: int,
@@ -851,19 +994,21 @@ def initiate_service_payment(
     payment = service.pago
     if payment is not None:
         if payment.estado == "CONFIRMADO" or service.estado == PAID_SERVICE_STATE:
-            return PaymentInitiationResponse(
-                payment_id=payment.id_pago,
-                payment_status=payment.estado,
-                amount=Decimal(payment.monto),
-                method=payment.metodo.nombre,
-                qr_payload=(payment.payload_pasarela or {}).get("qr_payload") if payment.payload_pasarela else None,
-                qr_url=payment.qr_url,
-                payment_url=(payment.payload_pasarela or {}).get("payment_url") if payment.payload_pasarela else None,
-                expires_at=None,
-                provider_reference=payment.referencia_externa or "",
-                message="Payment was already confirmed for this service.",
+            return _build_paid_payment_response(
+                payment=payment,
+                service=service,
+                message="Payment already confirmed.",
             )
         if payment.estado == "PENDIENTE" and payment.id_metodo == method.id_metodo:
+            if _is_cash_payment_method(method):
+                return _confirm_cash_payment(
+                    service=service,
+                    payment=payment,
+                    method=method,
+                    amount=amount,
+                    current_user=current_user,
+                    db=db,
+                )
             payload_pasarela = payment.payload_pasarela or {}
             expires_raw = payload_pasarela.get("expires_at")
             expires_at = None
@@ -881,7 +1026,7 @@ def initiate_service_payment(
                 qr_url=payment.qr_url,
                 payment_url=payload_pasarela.get("payment_url") if isinstance(payload_pasarela, dict) else None,
                 expires_at=expires_at,
-                provider_reference=payment.referencia_externa or "",
+                provider_reference=payment.referencia_externa,
                 message="Existing pending payment reused for this service.",
             )
         if payment.estado == "PENDIENTE" and payment.id_metodo != method.id_metodo:
@@ -916,6 +1061,16 @@ def initiate_service_payment(
         payment.qr_url = None
         payment.token_pago = None
         payment.referencia_externa = None
+
+    if _is_cash_payment_method(method):
+        return _confirm_cash_payment(
+            service=service,
+            payment=payment,
+            method=method,
+            amount=amount,
+            current_user=current_user,
+            db=db,
+        )
 
     try:
         provider_data = initiate_payment(

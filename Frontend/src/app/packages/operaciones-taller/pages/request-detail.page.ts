@@ -22,6 +22,11 @@ import {
   RequestDecisionPanelComponent,
 } from '../components/request-decision-panel.component';
 import { PrequotationResultCardComponent } from '../components/prequotation-result-card.component';
+import {
+  formatLocalDateTime,
+  localizeBackendMessage,
+  localizeStatusLabel,
+} from '../../../shared/utils/user-facing-text';
 import { WorkshopRequestsApi } from '../data-access/workshop-requests.api';
 import {
   PrequotationDecisionResult,
@@ -107,7 +112,7 @@ type DecisionConflictAction = 'catalog' | null;
                 </div>
                 <div class="summary-item">
                   <span class="text-muted">Estado del incidente</span>
-                  <strong>{{ data.incident_state }}</strong>
+                  <strong>{{ localizeStatus(data.incident_state) }}</strong>
                 </div>
                 <div class="summary-item">
                   <span class="text-muted">Enviada</span>
@@ -268,6 +273,16 @@ type DecisionConflictAction = 'catalog' | null;
             @if (successMessage()) {
               <app-card title="Resultado" subtitle="Ultima accion procesada correctamente.">
                 <p class="feedback feedback--success">{{ successMessage() }}</p>
+                @if (detail()?.request_status === 'ACEPTADA') {
+                  <div class="decision-help">
+                    <a
+                      class="app-button app-button--secondary"
+                      routerLink="/admin/services/waiting-assignment"
+                    >
+                      Ir a asignaciones
+                    </a>
+                  </div>
+                }
               </app-card>
             }
           </div>
@@ -517,15 +532,7 @@ export class RequestDetailPage {
   }
 
   protected formatDate(value: string): string {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
-
-    return new Intl.DateTimeFormat('es-BO', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(date);
+    return formatLocalDateTime(value);
   }
 
   protected formatDistance(value: string | number): string {
@@ -594,6 +601,10 @@ export class RequestDetailPage {
     return `${hours} h ${minutes} min`;
   }
 
+  protected localizeStatus(value: string | null | undefined): string {
+    return localizeStatusLabel(value);
+  }
+
   private submitDecision(
     requestId: number,
     payload: WorkshopRequestDecisionRequest,
@@ -620,7 +631,11 @@ export class RequestDetailPage {
   }
 
   private handleDecisionSuccess(response: WorkshopRequestDecisionResponse): void {
-    this.successMessage.set(response.message || 'Decision registrada correctamente.');
+    this.successMessage.set(
+      localizeBackendMessage(
+        response.message || 'Decision registrada correctamente.',
+      ),
+    );
     this.decisionMode.set(null);
 
     if (response.request_status === 'ACEPTADA') {
@@ -633,7 +648,7 @@ export class RequestDetailPage {
         prequotation_max: response.prequotation_max,
         prequotation_currency: response.prequotation_currency,
         catalog_service_name: response.catalog_service_name,
-        message: response.message,
+        message: localizeBackendMessage(response.message),
       });
 
       if (currentDetail) {
@@ -648,7 +663,7 @@ export class RequestDetailPage {
           prequotation_max: response.prequotation_max ?? null,
           prequotation_currency: response.prequotation_currency ?? null,
           catalog_service_name: response.catalog_service_name ?? null,
-          motivo_cierre: response.message,
+          motivo_cierre: localizeBackendMessage(response.message),
         });
       }
     }
@@ -722,7 +737,9 @@ export class RequestDetailPage {
     }
 
     return {
-      message: raw || 'No se pudo registrar la decision de la solicitud.',
+      message:
+        localizeBackendMessage(raw) ||
+        'No se pudo registrar la decision de la solicitud.',
       action: null,
     };
   }
@@ -730,7 +747,7 @@ export class RequestDetailPage {
   private mapGenericError(error: unknown, fallback: string): string {
     const raw = this.extractDetail(error);
     if (raw) {
-      return raw;
+      return localizeBackendMessage(raw);
     }
 
     if (error instanceof HttpErrorResponse) {
@@ -751,7 +768,7 @@ export class RequestDetailPage {
       const detail = error.error?.detail;
 
       if (typeof detail === 'string' && detail.trim()) {
-        return detail.trim();
+        return localizeBackendMessage(detail.trim());
       }
 
       if (Array.isArray(detail)) {
@@ -768,17 +785,17 @@ export class RequestDetailPage {
           .filter(Boolean);
 
         if (messages.length) {
-          return messages.join(' ');
+          return localizeBackendMessage(messages.join(' '));
         }
       }
 
       if (typeof error.error === 'string' && error.error.trim()) {
-        return error.error.trim();
+        return localizeBackendMessage(error.error.trim());
       }
     }
 
     if (error instanceof Error && error.message.trim()) {
-      return error.message.trim();
+      return localizeBackendMessage(error.message.trim());
     }
 
     return '';

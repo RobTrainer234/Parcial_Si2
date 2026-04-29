@@ -28,7 +28,7 @@ class AppSectionHeader extends StatelessWidget {
               Text(
                 label.toUpperCase(),
                 style: theme.textTheme.labelSmall?.copyWith(
-                  letterSpacing: 1.4,
+                  letterSpacing: 1.5,
                   fontWeight: FontWeight.w700,
                   color: theme.colorScheme.primary,
                 ),
@@ -39,7 +39,7 @@ class AppSectionHeader extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   subtitle!,
-                  style: theme.textTheme.bodyMedium,
+                  style: theme.textTheme.bodyLarge,
                 ),
               ],
             ],

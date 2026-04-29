@@ -17,6 +17,7 @@ import { ErrorStateComponent } from '../../../shared/components/error-state.comp
 import { LoadingStateComponent } from '../../../shared/components/loading-state.component';
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
+import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
 import { WorkshopCatalogApi } from '../data-access/workshop-catalog.api';
 import {
   WorkshopCatalogServiceCreateRequest,
@@ -890,7 +891,7 @@ export class WorkshopCatalogPage {
       const detail = error.error?.detail;
 
       if (typeof detail === 'string' && detail.trim()) {
-        return detail;
+        return localizeBackendMessage(detail);
       }
 
       if (Array.isArray(detail)) {
@@ -907,12 +908,12 @@ export class WorkshopCatalogPage {
           .filter(Boolean);
 
         if (messages.length) {
-          return messages.join(' ');
+          return localizeBackendMessage(messages.join(' '));
         }
       }
 
       if (typeof error.error === 'string' && error.error.trim()) {
-        return error.error;
+        return localizeBackendMessage(error.error);
       }
     }
 

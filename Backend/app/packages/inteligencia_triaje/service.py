@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal
+import logging
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
@@ -80,6 +81,7 @@ OPERARIO_PROFILE_ALLOWED_SERVICE_STATES = {
 }
 OPERARIO_PROFILE_ALLOWED_INCIDENT_STATES = {"DIAGNOSTICADO", "EN_MATCHMAKING", "EN_PROCESO"}
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _build_incident_query():
@@ -1012,6 +1014,60 @@ def _record_triage_failure_event(
     db.commit()
 
 
+def _log_triage_provider_failure(
+    *,
+    incident: Incidente,
+    error: Exception,
+) -> None:
+    image_count = sum(1 for item in incident.evidencias if item.tipo_evidencia == "IMAGEN")
+    audio_included = any(item.tipo_evidencia == "AUDIO" for item in incident.evidencias)
+    provider_name = settings.triage_ai_provider
+    model_name = settings.triage_ai_model
+    http_status_code = None
+    provider_response_excerpt = None
+
+    if isinstance(error, TriageProviderError):
+        provider_name = error.provider_name or provider_name
+        model_name = error.model_name or model_name
+        image_count = error.image_count if error.image_count is not None else image_count
+        audio_included = (
+            error.audio_included if error.audio_included is not None else audio_included
+        )
+        http_status_code = error.http_status_code
+        provider_response_excerpt = error.provider_response_excerpt
+
+    logger.warning(
+        "Triage provider failure: incident_id=%s exception=%s provider=%s model=%s image_count=%s audio_included=%s http_status_code=%s provider_response=%s",
+        incident.id_incidente,
+        error.__class__.__name__,
+        provider_name,
+        model_name,
+        image_count,
+        audio_included,
+        http_status_code,
+        provider_response_excerpt,
+    )
+
+
+def _build_triage_provider_http_detail(error: TriageProviderError) -> str:
+    if error.http_status_code == 400:
+        return "Triage AI provider rejected the request payload."
+    if error.http_status_code == 401:
+        return "Triage AI provider rejected the configured credentials."
+    if error.http_status_code == 403:
+        response_excerpt = (error.provider_response_excerpt or "").lower()
+        if "1010" in response_excerpt or "cloudflare" in response_excerpt:
+            return "Triage AI provider blocked the request. Check API key, network, or client headers."
+        return "Triage AI provider denied access for the configured project or API key."
+    if error.http_status_code == 404:
+        return "Triage AI provider model was not found."
+    if error.http_status_code == 429:
+        return "Triage AI provider quota is exhausted or billing is unavailable."
+    if error.http_status_code is not None and error.http_status_code >= 500:
+        return "Triage AI provider is temporarily unavailable."
+    return "Triage AI provider failed."
+
+
 def _map_detected_specialty(
     *,
     specialty_map: dict[str, Especialidad],
@@ -1076,7 +1132,6 @@ def _execute_incident_classification(
     manual_review_required = (
         detected_specialty is None
         or confidence_value < settings.triage_min_confidence
-        or provider_metadata.get("audio_omitted_reason") is not None
     )
 
     incident.diagnostico_ia_resumen = provider_result.resumen
@@ -1220,6 +1275,25 @@ def _auto_run_incident_classification(
             db.rollback()
     except SQLAlchemyError:
         db.rollback()
+
+
+def list_specialties(db: Session) -> list["SpecialtyResponse"]:
+    from .schemas import SpecialtyResponse
+
+    rows = list(
+        db.scalars(
+            select(Especialidad).order_by(Especialidad.nombre.asc())
+        )
+    )
+    return [
+        SpecialtyResponse(
+            id_especialidad=item.id_especialidad,
+            nombre=item.nombre,
+            descripcion=item.descripcion,
+            nivel_complejidad=item.nivel_complejidad,
+        )
+        for item in rows
+    ]
 
 
 def report_incident(
@@ -1441,6 +1515,7 @@ def classify_incident(
             user_agent=user_agent,
         )
     except TriageProviderNotConfiguredError as exc:
+        _log_triage_provider_failure(incident=incident, error=exc)
         try:
             _record_triage_failure_event(
                 db=db,
@@ -1458,6 +1533,7 @@ def classify_incident(
             detail="Triage AI provider is not configured.",
         ) from exc
     except TriageProviderInvalidResponseError as exc:
+        _log_triage_provider_failure(incident=incident, error=exc)
         try:
             _record_triage_failure_event(
                 db=db,
@@ -1475,6 +1551,7 @@ def classify_incident(
             detail="Triage AI returned an invalid response.",
         ) from exc
     except TriageProviderError as exc:
+        _log_triage_provider_failure(incident=incident, error=exc)
         try:
             _record_triage_failure_event(
                 db=db,
@@ -1489,7 +1566,7 @@ def classify_incident(
             db.rollback()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Triage AI provider failed.",
+            detail=_build_triage_provider_http_detail(exc),
         ) from exc
     except StorageError as exc:
         try:

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../routing/app_router.dart';
 import '../theme/app_theme.dart';
+import '../theme/theme_mode_controller.dart';
 
 class App extends ConsumerWidget {
   const App({super.key});
@@ -10,13 +11,14 @@ class App extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
+    final themeMode = ref.watch(themeModeControllerProvider);
 
     return MaterialApp.router(
       title: 'Auxilio Vial',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
+      themeMode: themeMode,
       routerConfig: router,
     );
   }

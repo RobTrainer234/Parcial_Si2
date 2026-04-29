@@ -330,6 +330,23 @@ class ServicePrequotationResponse(BaseModel):
     message: str
 
 
+class ClientActiveServiceSummaryResponse(BaseModel):
+    service_id: int
+    service_state: str
+    incident_id: int
+    incident_state: str
+    workshop_name: str | None = None
+    operario_name: str | None = None
+    detected_specialty: str | None = None
+    ai_summary: str | None = None
+    prequotation_code: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    prequotation_currency: str | None = "BOB"
+    created_at: datetime | None = None
+    assigned_at: datetime | None = None
+
+
 class HireWorkshopRequest(_NormalizedModel):
     workshop_id: int
 

@@ -9,6 +9,7 @@ import {
 import { RouterLink } from '@angular/router';
 
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
+import { formatLocalDateTime } from '../../../shared/utils/user-facing-text';
 import { WorkshopRequestSummary } from '../data-access/workshop-request.models';
 
 @Component({
@@ -178,15 +179,7 @@ export class PendingRequestCardComponent {
   );
 
   protected formatDate(value: string): string {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
-
-    return new Intl.DateTimeFormat('es-BO', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(date);
+    return formatLocalDateTime(value);
   }
 
   protected formatDistance(value: string | number): string {

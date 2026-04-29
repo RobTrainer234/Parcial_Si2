@@ -3,6 +3,10 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 import { AppCardComponent } from '../../../shared/components/app-card.component';
+import {
+  localizeBackendMessage,
+  localizeStatusLabel,
+} from '../../../shared/utils/user-facing-text';
 import { PrequotationDecisionResult } from '../data-access/workshop-request.models';
 
 @Component({
@@ -12,8 +16,8 @@ import { PrequotationDecisionResult } from '../data-access/workshop-request.mode
   imports: [CommonModule, RouterLink, AppCardComponent],
   template: `
     <app-card
-      title="Resultado de aceptación"
-      subtitle="La solicitud fue aceptada exitosamente."
+      title="Solicitud aceptada"
+      subtitle="Servicio creado y pendiente de asignacion."
     >
       <div class="result-grid">
         @if (result().service_id) {
@@ -25,30 +29,30 @@ import { PrequotationDecisionResult } from '../data-access/workshop-request.mode
         @if (result().service_state) {
           <div class="result-item">
             <span class="text-muted">Estado del servicio</span>
-            <strong>{{ result().service_state }}</strong>
+            <strong>{{ localizeStatus(result().service_state) }}</strong>
           </div>
         }
         @if (result().prequotation_code) {
           <div class="result-item">
-            <span class="text-muted">Código de pre-cotización</span>
+            <span class="text-muted">Codigo de pre-cotizacion</span>
             <strong>{{ result().prequotation_code }}</strong>
           </div>
         }
         @if (result().catalog_service_name) {
           <div class="result-item">
-            <span class="text-muted">Servicio de catálogo</span>
+            <span class="text-muted">Servicio de catalogo</span>
             <strong>{{ result().catalog_service_name }}</strong>
           </div>
         }
         @if (result().prequotation_min !== null && result().prequotation_min !== undefined) {
           <div class="result-item">
-            <span class="text-muted">Rango mínimo</span>
+            <span class="text-muted">Rango minimo</span>
             <strong>{{ formatCurrency(result().prequotation_min) }}</strong>
           </div>
         }
         @if (result().prequotation_max !== null && result().prequotation_max !== undefined) {
           <div class="result-item">
-            <span class="text-muted">Rango máximo</span>
+            <span class="text-muted">Rango maximo</span>
             <strong>{{ formatCurrency(result().prequotation_max) }}</strong>
           </div>
         }
@@ -61,16 +65,19 @@ import { PrequotationDecisionResult } from '../data-access/workshop-request.mode
       </div>
 
       <p class="result-note text-muted">
-        La pre-cotización es referencial antes del diagnóstico físico del operario.
+        La pre-cotizacion es referencial antes del diagnostico fisico del operario.
       </p>
 
       @if (result().message) {
-        <p class="result-message">{{ result().message }}</p>
+        <p class="result-message">{{ localizeMessage(result().message) }}</p>
       }
 
       @if (showAssignmentLink()) {
         <div class="result-actions">
-          <a class="app-button app-button--secondary" routerLink="/admin/services/waiting-assignment">
+          <a
+            class="app-button app-button--secondary"
+            routerLink="/admin/services/waiting-assignment"
+          >
             Ir a asignaciones
           </a>
         </div>
@@ -105,6 +112,14 @@ import { PrequotationDecisionResult } from '../data-access/workshop-request.mode
 export class PrequotationResultCardComponent {
   readonly result = input.required<PrequotationDecisionResult>();
   readonly showAssignmentLink = input<boolean>(true);
+
+  protected localizeStatus(value: string | null | undefined): string {
+    return localizeStatusLabel(value);
+  }
+
+  protected localizeMessage(value: string | null | undefined): string {
+    return localizeBackendMessage(value);
+  }
 
   protected formatCurrency(value: string | number | null | undefined): string {
     const numeric = Number(value ?? 0);

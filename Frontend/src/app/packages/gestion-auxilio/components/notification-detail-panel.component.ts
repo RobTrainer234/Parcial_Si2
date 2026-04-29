@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
+import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
 import { NotificationDetail } from '../data-access/notifications.models';
 
 @Component({
@@ -12,7 +13,7 @@ import { NotificationDetail } from '../data-access/notifications.models';
   template: `
     <section class="detail-panel app-card">
       <header class="detail-panel__header">
-        <h4>{{ detail()?.title || detail()?.titulo || 'Detalle de Notificación' }}</h4>
+        <h4>{{ detail()?.title || detail()?.titulo || 'Detalle de Notificacion' }}</h4>
         <button
           type="button"
           class="app-button app-button--secondary app-button--sm"
@@ -24,33 +25,33 @@ import { NotificationDetail } from '../data-access/notifications.models';
 
       @if (detail(); as notif) {
         <div class="detail-panel__body">
-          <p class="detail-message">{{ notif.message || notif.mensaje }}</p>
+          <p class="detail-message">{{ localizeMessage(notif.message || notif.mensaje) }}</p>
 
           <div class="detail-grid mt-4">
             <div class="detail-item">
-              <span class="detail-label">ID Notificación</span>
+              <span class="detail-label">ID Notificacion</span>
               <span class="detail-value">#{{ notif.notification_id || notif.id_notificacion }}</span>
             </div>
-            
+
             <div class="detail-item">
-              <span class="detail-label">Fecha de Creación</span>
+              <span class="detail-label">Fecha de creacion</span>
               <span class="detail-value">{{ formatDate(notif.created_at || notif.fecha_creacion) }}</span>
             </div>
-            
+
             <div class="detail-item">
               <span class="detail-label">Estado</span>
               <span class="detail-value">
                 @if (notif.read || notif.leida) {
-                  <span class="badge badge--neutral">Leída</span>
+                  <span class="badge badge--neutral">Leida</span>
                 } @else {
-                  <span class="badge badge--warning">No leída</span>
+                  <span class="badge badge--warning">No leida</span>
                 }
               </span>
             </div>
 
             @if (notif.read_at || notif.fecha_lectura) {
               <div class="detail-item">
-                <span class="detail-label">Fecha de Lectura</span>
+                <span class="detail-label">Fecha de lectura</span>
                 <span class="detail-value">{{ formatDate(notif.read_at || notif.fecha_lectura) }}</span>
               </div>
             }
@@ -59,7 +60,7 @@ import { NotificationDetail } from '../data-access/notifications.models';
               <span class="detail-label">Tipo</span>
               <span class="detail-value">{{ notif.type || notif.tipo || '-' }}</span>
             </div>
-            
+
             <div class="detail-item">
               <span class="detail-label">Prioridad</span>
               <span class="detail-value">
@@ -71,44 +72,35 @@ import { NotificationDetail } from '../data-access/notifications.models';
           <div class="detail-grid mt-3">
             @if (notif.service_id) {
               <div class="detail-item">
-                <span class="detail-label">Servicio Relacionado</span>
+                <span class="detail-label">Servicio relacionado</span>
                 <span class="detail-value">#{{ notif.service_id }}</span>
               </div>
             }
             @if (notif.incident_id) {
               <div class="detail-item">
-                <span class="detail-label">Incidente Relacionado</span>
+                <span class="detail-label">Incidente relacionado</span>
                 <span class="detail-value">#{{ notif.incident_id }}</span>
               </div>
             }
             @if (notif.request_id) {
               <div class="detail-item">
-                <span class="detail-label">Solicitud Relacionada</span>
+                <span class="detail-label">Solicitud relacionada</span>
                 <span class="detail-value">#{{ notif.request_id }}</span>
               </div>
             }
             @if (notif.audit_id) {
               <div class="detail-item">
-                <span class="detail-label">Auditoría Relacionada</span>
+                <span class="detail-label">Auditoria relacionada</span>
                 <span class="detail-value">#{{ notif.audit_id }}</span>
               </div>
             }
             @if (notif.payment_id) {
               <div class="detail-item">
-                <span class="detail-label">Pago Relacionado</span>
+                <span class="detail-label">Pago relacionado</span>
                 <span class="detail-value">#{{ notif.payment_id }}</span>
               </div>
             }
           </div>
-
-          @if (hasTechnicalDetails(notif)) {
-            <div class="technical-details mt-4">
-              <h5 class="mb-3">Detalle Técnico</h5>
-              <div class="json-block">
-                <pre><code>{{ formatJson(notif.metadata || notif.detalle_json) }}</code></pre>
-              </div>
-            </div>
-          }
         </div>
       }
     </section>
@@ -174,37 +166,16 @@ import { NotificationDetail } from '../data-access/notifications.models';
       .mt-4 {
         margin-top: var(--space-4);
       }
-
-      .mb-3 {
-        margin-bottom: var(--space-3);
-      }
-
-      .technical-details {
-        padding-top: var(--space-4);
-        border-top: 1px solid var(--color-border);
-      }
-
-      .technical-details h5 {
-        margin-top: 0;
-        color: var(--color-primary);
-      }
-
-      .json-block pre {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3);
-        overflow-x: auto;
-        font-size: 0.85rem;
-        margin-top: var(--space-2);
-        margin-bottom: 0;
-      }
     `,
   ],
 })
 export class NotificationDetailPanelComponent {
   readonly detail = input<NotificationDetail | null>(null);
   readonly closePanel = output<void>();
+
+  protected localizeMessage(value: string | null | undefined): string {
+    return localizeBackendMessage(value);
+  }
 
   protected formatDate(value: string | null | undefined): string {
     if (!value) return '-';
@@ -217,21 +188,5 @@ export class NotificationDetailPanelComponent {
       dateStyle: 'medium',
       timeStyle: 'medium',
     }).format(date);
-  }
-
-  protected hasTechnicalDetails(notif: NotificationDetail): boolean {
-    return Boolean(notif.metadata || notif.detalle_json);
-  }
-
-  protected formatJson(data: unknown): string {
-    try {
-      if (typeof data === 'string') {
-        const parsed = JSON.parse(data);
-        return JSON.stringify(parsed, null, 2);
-      }
-      return JSON.stringify(data, null, 2);
-    } catch {
-      return String(data);
-    }
   }
 }

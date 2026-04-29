@@ -22,6 +22,8 @@ import {
   RequestDecisionPanelComponent,
 } from '../components/request-decision-panel.component';
 import { PrequotationResultCardComponent } from '../components/prequotation-result-card.component';
+import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
+import { WorkshopAssignmentApi } from '../data-access/workshop-assignment.api';
 import { WorkshopRequestsApi } from '../data-access/workshop-requests.api';
 import {
   PrequotationDecisionResult,
@@ -57,6 +59,9 @@ type DecisionConflictAction = 'catalog' | null;
       >
         <div page-actions class="toolbar toolbar--tight">
           <span class="badge badge--info">{{ requests().length }} pendiente(s)</span>
+          <span class="badge badge--warning">
+            {{ waitingAssignmentCount() }} en espera de asignacion
+          </span>
           <button
             type="button"
             class="app-button app-button--ghost"
@@ -93,10 +98,26 @@ type DecisionConflictAction = 'catalog' | null;
           </button>
         </app-error-state>
       } @else if (!requests().length) {
-        <app-empty-state
-          title="Sin solicitudes pendientes"
-          message="No hay solicitudes pendientes en este momento."
-        />
+        @if (waitingAssignmentCount() > 0) {
+          <app-card
+            title="Sin solicitudes pendientes"
+            subtitle="No hay solicitudes pendientes. Tienes servicios aceptados pendientes de asignacion."
+          >
+            <div class="decision-help">
+              <a
+                class="app-button app-button--secondary"
+                routerLink="/admin/services/waiting-assignment"
+              >
+                Ir a asignaciones
+              </a>
+            </div>
+          </app-card>
+        } @else {
+          <app-empty-state
+            title="Sin solicitudes pendientes"
+            message="No hay solicitudes pendientes."
+          />
+        }
       } @else {
         <section class="request-list">
           @for (item of requests(); track item.request_id) {
@@ -175,6 +196,7 @@ type DecisionConflictAction = 'catalog' | null;
 })
 export class PendingRequestsPage {
   private readonly api = inject(WorkshopRequestsApi);
+  private readonly assignmentApi = inject(WorkshopAssignmentApi);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly loading = signal(false);
@@ -184,6 +206,7 @@ export class PendingRequestsPage {
   protected readonly successMessage = signal('');
   protected readonly decisionConflictAction = signal<DecisionConflictAction>(null);
   protected readonly requests = signal<WorkshopRequestSummary[]>([]);
+  protected readonly waitingAssignmentCount = signal(0);
   protected readonly selectedRequest = signal<WorkshopRequestSummary | null>(null);
   protected readonly decisionMode = signal<RequestDecisionMode>(null);
   protected readonly acceptedResult = signal<PrequotationDecisionResult | null>(null);
@@ -219,6 +242,18 @@ export class PendingRequestsPage {
             ),
           );
           this.loading.set(false);
+        },
+      });
+
+    this.assignmentApi
+      .listWaitingAssignmentServices()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.waitingAssignmentCount.set(response.length);
+        },
+        error: () => {
+          this.waitingAssignmentCount.set(0);
         },
       });
   }
@@ -293,12 +328,17 @@ export class PendingRequestsPage {
   }
 
   private handleDecisionSuccess(response: WorkshopRequestDecisionResponse): void {
-    this.successMessage.set(response.message || 'Decision registrada correctamente.');
+    this.successMessage.set(
+      localizeBackendMessage(
+        response.message || 'Decision registrada correctamente.',
+      ),
+    );
     this.requests.update((items) =>
       items.filter((item) => item.request_id !== response.request_id),
     );
 
     if (response.request_status === 'ACEPTADA') {
+      this.waitingAssignmentCount.update((count) => count + 1);
       this.acceptedResult.set({
         service_id: response.service_id,
         service_state: response.service_state,
@@ -307,7 +347,7 @@ export class PendingRequestsPage {
         prequotation_max: response.prequotation_max,
         prequotation_currency: response.prequotation_currency,
         catalog_service_name: response.catalog_service_name,
-        message: response.message,
+        message: localizeBackendMessage(response.message),
       });
     } else {
       this.acceptedResult.set(null);
@@ -374,7 +414,9 @@ export class PendingRequestsPage {
     }
 
     return {
-      message: raw || 'No se pudo registrar la decision de la solicitud.',
+      message:
+        localizeBackendMessage(raw) ||
+        'No se pudo registrar la decision de la solicitud.',
       action: null,
     };
   }
@@ -382,7 +424,7 @@ export class PendingRequestsPage {
   private mapGenericError(error: unknown, fallback: string): string {
     const raw = this.extractDetail(error);
     if (raw) {
-      return raw;
+      return localizeBackendMessage(raw);
     }
 
     if (error instanceof HttpErrorResponse && error.status === 403) {
@@ -397,7 +439,7 @@ export class PendingRequestsPage {
       const detail = error.error?.detail;
 
       if (typeof detail === 'string' && detail.trim()) {
-        return detail.trim();
+        return localizeBackendMessage(detail.trim());
       }
 
       if (Array.isArray(detail)) {
@@ -414,17 +456,17 @@ export class PendingRequestsPage {
           .filter(Boolean);
 
         if (messages.length) {
-          return messages.join(' ');
+          return localizeBackendMessage(messages.join(' '));
         }
       }
 
       if (typeof error.error === 'string' && error.error.trim()) {
-        return error.error.trim();
+        return localizeBackendMessage(error.error.trim());
       }
     }
 
     if (error instanceof Error && error.message.trim()) {
-      return error.message.trim();
+      return localizeBackendMessage(error.message.trim());
     }
 
     return '';

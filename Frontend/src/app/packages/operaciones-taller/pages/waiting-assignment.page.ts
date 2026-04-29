@@ -18,6 +18,7 @@ import { PageHeaderComponent } from '../../../shared/components/page-header.comp
 import { AssignmentConfirmationPanelComponent } from '../components/assignment-confirmation-panel.component';
 import { OperarioCandidatesTableComponent } from '../components/operario-candidates-table.component';
 import { WaitingServiceCardComponent } from '../components/waiting-service-card.component';
+import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
 import { WorkshopAssignmentApi } from '../data-access/workshop-assignment.api';
 import {
   AssignOperarioResponse,
@@ -357,7 +358,9 @@ export class WaitingAssignmentPage {
           this.assignmentLoading.set(false);
           this.lastAssignment.set(response);
           this.successMessage.set(
-            response.message || 'Operario asignado correctamente al servicio.',
+            localizeBackendMessage(
+              response.message || 'Operario asignado correctamente al servicio.',
+            ),
           );
           this.selectedCandidate.set(null);
           this.reload();
@@ -418,13 +421,13 @@ export class WaitingAssignmentPage {
       return 'Actualiza la lista e intenta nuevamente.';
     }
 
-    return raw || 'No se pudo asignar el operario seleccionado.';
+    return localizeBackendMessage(raw) || 'No se pudo asignar el operario seleccionado.';
   }
 
   private mapGenericError(error: unknown, fallback: string): string {
     const raw = this.extractDetail(error);
     if (raw) {
-      return raw;
+      return localizeBackendMessage(raw);
     }
 
     if (error instanceof HttpErrorResponse) {
@@ -445,7 +448,7 @@ export class WaitingAssignmentPage {
       const detail = error.error?.detail;
 
       if (typeof detail === 'string' && detail.trim()) {
-        return detail.trim();
+        return localizeBackendMessage(detail.trim());
       }
 
       if (Array.isArray(detail)) {
@@ -462,17 +465,17 @@ export class WaitingAssignmentPage {
           .filter(Boolean);
 
         if (messages.length) {
-          return messages.join(' ');
+          return localizeBackendMessage(messages.join(' '));
         }
       }
 
       if (typeof error.error === 'string' && error.error.trim()) {
-        return error.error.trim();
+        return localizeBackendMessage(error.error.trim());
       }
     }
 
     if (error instanceof Error && error.message.trim()) {
-      return error.message.trim();
+      return localizeBackendMessage(error.message.trim());
     }
 
     return '';

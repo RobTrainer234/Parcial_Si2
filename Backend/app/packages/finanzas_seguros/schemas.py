@@ -54,7 +54,7 @@ class PaymentInitiationResponse(BaseModel):
     qr_url: str | None = None
     payment_url: str | None = None
     expires_at: datetime | None = None
-    provider_reference: str
+    provider_reference: str | None = None
     message: str
 
 

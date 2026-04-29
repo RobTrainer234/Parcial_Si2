@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 
 import { AppCardComponent } from '../../../shared/components/app-card.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state.component';
@@ -10,8 +11,6 @@ import { MetricCardComponent } from '../../../shared/components/metric-card.comp
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
 import {
-  DashboardActionItem,
-  DashboardCountItem,
   DashboardMonthlyRevenueItem,
   DashboardOverviewResponse,
 } from '../data-access/workshop-dashboard.models';
@@ -22,6 +21,7 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
   standalone: true,
   imports: [
     CommonModule,
+    RouterLink,
     PageHeaderComponent,
     MetricCardComponent,
     AppCardComponent,
@@ -50,7 +50,7 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
       } @else if (error()) {
         <app-error-state [message]="error()">
           <button error-actions type="button" class="app-button" (click)="reload()">
-            Reintentar
+            Actualizar panel
           </button>
         </app-error-state>
       } @else if (overview(); as data) {
@@ -80,6 +80,22 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
             [value]="formatInteger(data.action_items.length)"
             hint="Elementos operativos que requieren seguimiento"
           />
+          <app-card
+            title="Servicios realizados"
+            subtitle="Consulta el historial operativo, pago y calificacion del taller."
+          >
+            <div class="history-card">
+              <div>
+                <span class="history-card__label">Servicios completados o pagados</span>
+                <strong class="history-card__value">
+                  {{ formatInteger(data.kpis.completed_services) }}
+                </strong>
+              </div>
+              <a routerLink="/admin/services" class="app-button app-button--secondary">
+                Ver historial
+              </a>
+            </div>
+          </app-card>
         </section>
 
         <section class="section-grid">
@@ -247,6 +263,26 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       }
 
+      .history-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+      }
+
+      .history-card__label {
+        display: block;
+        color: var(--color-text-muted);
+        font-size: 0.86rem;
+      }
+
+      .history-card__value {
+        display: block;
+        margin-top: var(--space-2);
+        font-size: 1.45rem;
+      }
+
       .finance-grid__item {
         padding: var(--space-4);
         border-radius: var(--radius-lg);
@@ -347,11 +383,11 @@ export class AdminDashboardPage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.overview.set(response);
+          this.overview.set(this.normalizeOverview(response));
           this.loading.set(false);
         },
-        error: (error) => {
-          this.error.set(error.error?.detail ?? 'No se pudo cargar el panel operativo.');
+        error: () => {
+          this.error.set('No se pudo cargar el panel. Intenta actualizar.');
           this.loading.set(false);
         },
       });
@@ -420,5 +456,108 @@ export class AdminDashboardPage {
   private asNumber(value: number | string | null | undefined): number {
     const numericValue = Number(value ?? 0);
     return Number.isFinite(numericValue) ? numericValue : 0;
+  }
+
+  private normalizeOverview(
+    response: DashboardOverviewResponse | null | undefined,
+  ): DashboardOverviewResponse {
+    const data = response ?? this.buildEmptyOverview();
+    return {
+      period: {
+        date_from: data.period?.date_from ?? '',
+        date_to: data.period?.date_to ?? '',
+      },
+      kpis: {
+        pending_requests: this.asNumber(data.kpis?.pending_requests),
+        accepted_requests: this.asNumber(data.kpis?.accepted_requests),
+        rejected_requests: this.asNumber(data.kpis?.rejected_requests),
+        expired_requests: this.asNumber(data.kpis?.expired_requests),
+        active_services: this.asNumber(data.kpis?.active_services),
+        completed_services: this.asNumber(data.kpis?.completed_services),
+        paid_services: this.asNumber(data.kpis?.paid_services),
+        pending_payments: this.asNumber(data.kpis?.pending_payments),
+        total_revenue: this.asNumber(data.kpis?.total_revenue),
+        average_rating:
+          data.kpis?.average_rating !== null && data.kpis?.average_rating !== undefined
+            ? Number(data.kpis.average_rating)
+            : null,
+        first_contact_resolution_rate:
+          data.kpis?.first_contact_resolution_rate !== null &&
+          data.kpis?.first_contact_resolution_rate !== undefined
+            ? Number(data.kpis.first_contact_resolution_rate)
+            : null,
+        average_acceptance_time_minutes:
+          data.kpis?.average_acceptance_time_minutes !== null &&
+          data.kpis?.average_acceptance_time_minutes !== undefined
+            ? Number(data.kpis.average_acceptance_time_minutes)
+            : null,
+        average_completion_time_minutes:
+          data.kpis?.average_completion_time_minutes !== null &&
+          data.kpis?.average_completion_time_minutes !== undefined
+            ? Number(data.kpis.average_completion_time_minutes)
+            : null,
+      },
+      operations: {
+        services_by_state: data.operations?.services_by_state ?? [],
+        requests_by_status: data.operations?.requests_by_status ?? [],
+      },
+      financial: {
+        total_revenue: this.asNumber(data.financial?.total_revenue),
+        confirmed_payments: this.asNumber(data.financial?.confirmed_payments),
+        pending_payments: this.asNumber(data.financial?.pending_payments),
+        rejected_payments: this.asNumber(data.financial?.rejected_payments),
+        average_ticket:
+          data.financial?.average_ticket !== null &&
+          data.financial?.average_ticket !== undefined
+            ? this.asNumber(data.financial.average_ticket)
+            : null,
+        projected_revenue:
+          data.financial?.projected_revenue !== null &&
+          data.financial?.projected_revenue !== undefined
+            ? this.asNumber(data.financial.projected_revenue)
+            : null,
+        monthly_revenue: data.financial?.monthly_revenue ?? [],
+      },
+      operarios: data.operarios ?? {},
+      reputation: data.reputation ?? {},
+      action_items: data.action_items ?? [],
+    };
+  }
+
+  private buildEmptyOverview(): DashboardOverviewResponse {
+    return {
+      period: { date_from: '', date_to: '' },
+      kpis: {
+        pending_requests: 0,
+        accepted_requests: 0,
+        rejected_requests: 0,
+        expired_requests: 0,
+        active_services: 0,
+        completed_services: 0,
+        paid_services: 0,
+        pending_payments: 0,
+        total_revenue: 0,
+        average_rating: null,
+        first_contact_resolution_rate: null,
+        average_acceptance_time_minutes: null,
+        average_completion_time_minutes: null,
+      },
+      operations: {
+        services_by_state: [],
+        requests_by_status: [],
+      },
+      financial: {
+        total_revenue: 0,
+        confirmed_payments: 0,
+        pending_payments: 0,
+        rejected_payments: 0,
+        average_ticket: null,
+        projected_revenue: null,
+        monthly_revenue: [],
+      },
+      operarios: {},
+      reputation: {},
+      action_items: [],
+    };
   }
 }

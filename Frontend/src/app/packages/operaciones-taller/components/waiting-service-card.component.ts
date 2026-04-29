@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
+import { localizeStatusLabel } from '../../../shared/utils/user-facing-text';
 import { WaitingAssignmentServiceSummary } from '../data-access/workshop-assignment.models';
 
 @Component({
@@ -38,7 +39,7 @@ import { WaitingAssignmentServiceSummary } from '../data-access/workshop-assignm
         </div>
         <div class="service-card__item">
           <span class="text-muted">Estado incidente</span>
-          <strong>{{ service().incident_state || 'Sin estado' }}</strong>
+          <strong>{{ localizeStatus(service().incident_state) }}</strong>
         </div>
         <div class="service-card__item">
           <span class="text-muted">Servicio de catalogo</span>
@@ -150,6 +151,10 @@ export class WaitingServiceCardComponent {
 
     return 'Sin pre-cotizacion';
   });
+
+  protected localizeStatus(value: string | null | undefined): string {
+    return localizeStatusLabel(value || 'Sin estado');
+  }
 
   private formatAmount(value: string | number | null | undefined): string {
     const numeric = Number(value ?? 0);

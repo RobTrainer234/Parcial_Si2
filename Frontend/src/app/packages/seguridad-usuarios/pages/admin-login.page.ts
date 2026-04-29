@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 
 import { AuthService } from '../../../core/auth/auth.service';
 import { ThemeService } from '../../../core/theme/theme.service';
+import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
 
 @Component({
   selector: 'app-admin-login-page',
@@ -245,7 +246,7 @@ export class AdminLoginPage {
             ? error.message
             : 'No se pudo iniciar sesión. Verifica tus credenciales.';
 
-      this.errorMessage.set(String(backendMessage));
+      this.errorMessage.set(localizeBackendMessage(String(backendMessage)));
     } finally {
       this.submitting.set(false);
     }

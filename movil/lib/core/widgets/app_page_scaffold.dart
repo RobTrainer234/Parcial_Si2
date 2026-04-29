@@ -10,7 +10,7 @@ class AppPageScaffold extends StatelessWidget {
     this.title,
     this.subtitle,
     this.actions,
-    this.padding = const EdgeInsets.fromLTRB(20, 12, 20, 24),
+    this.padding = const EdgeInsets.fromLTRB(20, 16, 20, 24),
   });
 
   final Widget child;
@@ -26,22 +26,27 @@ class AppPageScaffold extends StatelessWidget {
 
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: padding,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasHeader) ...[
-                AppSectionHeader(
-                  label: label ?? '',
-                  title: title ?? '',
-                  subtitle: subtitle,
-                  action: actions,
-                ),
-                const SizedBox(height: 24),
-              ],
-              Expanded(child: child),
-            ],
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: padding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (hasHeader) ...[
+                    AppSectionHeader(
+                      label: label ?? '',
+                      title: title ?? '',
+                      subtitle: subtitle,
+                      action: actions,
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                  Expanded(child: child),
+                ],
+              ),
+            ),
           ),
         ),
       ),

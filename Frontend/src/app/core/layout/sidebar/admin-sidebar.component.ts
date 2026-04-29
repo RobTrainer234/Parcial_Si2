@@ -132,6 +132,7 @@ export class AdminSidebarComponent {
     { label: 'Operarios', path: '/admin/workshop/staff' },
     { label: 'Solicitudes', path: '/admin/requests' },
     { label: 'Asignaciones', path: '/admin/services/waiting-assignment' },
+    { label: 'Servicios realizados', path: '/admin/services', exact: true },
     { label: 'Auditoría', path: '/admin/audit' },
     { label: 'Notificaciones', path: '/admin/notifications' },
   ];

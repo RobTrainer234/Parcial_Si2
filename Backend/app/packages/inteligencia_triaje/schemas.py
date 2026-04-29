@@ -42,6 +42,13 @@ class SpecialtySummaryResponse(BaseModel):
     nombre: str
 
 
+class SpecialtyResponse(BaseModel):
+    id_especialidad: int
+    nombre: str
+    descripcion: str | None = None
+    nivel_complejidad: int | None = None
+
+
 class IncidentEvidenceSummaryResponse(BaseModel):
     total: int
     imagenes: int

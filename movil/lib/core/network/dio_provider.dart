@@ -24,8 +24,9 @@ final dioProvider = Provider<Dio>((ref) {
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) async {
-        // Only attach token to our backend requests
-        if (options.path.startsWith('/') || options.path.startsWith(AppConfig.apiBaseUrl)) {
+        final requiresAuth = options.extra['requiresAuth'] ?? true;
+        // Only attach token to our backend requests if requiresAuth is true
+        if (requiresAuth && (options.path.startsWith('/') || options.path.startsWith(AppConfig.apiBaseUrl))) {
           final token = await tokenStorage.readAccessToken();
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';

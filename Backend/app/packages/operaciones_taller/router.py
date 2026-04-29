@@ -33,6 +33,8 @@ from .schemas import (
     WorkshopMediaUploadRequest,
     WorkshopProfileResponse,
     WorkshopProfileUpdateRequest,
+    WorkshopServiceHistoryDetailResponse,
+    WorkshopServiceHistorySummary,
     WorkshopStaffAvailabilityUpdateRequest,
     WorkshopStaffCreateRequest,
     WorkshopStaffSummary,
@@ -48,8 +50,10 @@ from .service import (
     get_repair_report_snapshot,
     get_workshop_profile,
     get_workshop_request_detail,
+    get_workshop_service_history_detail,
     list_workshop_catalog_services,
     list_workshop_media_files,
+    list_workshop_service_history,
     list_workshop_staff,
     list_waiting_assignment_services,
     list_pending_workshop_requests,
@@ -309,6 +313,48 @@ def workshop_request_decision(
         db=db,
         ip_origen=request.client.host if request.client is not None else None,
         user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.get(
+    "/services/history",
+    response_model=list[WorkshopServiceHistorySummary],
+)
+def workshop_services_history(
+    estado: str | None = None,
+    desde: datetime | None = None,
+    hasta: datetime | None = None,
+    operario_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> list[WorkshopServiceHistorySummary]:
+    return list_workshop_service_history(
+        admin_context=admin_context,
+        db=db,
+        estado=estado,
+        desde=desde,
+        hasta=hasta,
+        operario_id=operario_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/services/{service_id}/history-detail",
+    response_model=WorkshopServiceHistoryDetailResponse,
+)
+def workshop_service_history_detail(
+    service_id: int,
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> WorkshopServiceHistoryDetailResponse:
+    return get_workshop_service_history_detail(
+        service_id=service_id,
+        admin_context=admin_context,
+        db=db,
     )
 
 

@@ -36,6 +36,7 @@ from app.packages.seguridad_usuarios.security import utc_now
 from .maps_provider import RouteProviderError, get_route
 from .push_provider import PushProviderError, send_push_notification
 from .schemas import (
+    ClientActiveServiceSummaryResponse,
     DeviceRegistrationRequest,
     DeviceRegistrationResponse,
     DeviceUnregisterRequest,
@@ -109,12 +110,16 @@ FINALIZATION_TIMELINE_ACTIONS = {
     "FINALIZACION_RECHAZADA_CLIENTE",
 }
 TRACKING_ALLOWED_STATES = {
+    "EN_ESPERA_ASIGNACION",
     "ASIGNADO",
     "EN_CAMINO",
     "EN_SITIO",
     "EN_DIAGNOSTICO_FISICO",
     "EN_REPARACION",
     "ESPERANDO_REPUESTOS",
+    "COMPLETADO_PENDIENTE_CONFIRMACION",
+    "FINALIZADO_PENDIENTE_PAGO",
+    "PAGADO",
 }
 TRACKING_STALE_MINUTES = 5
 TRACKING_FALLBACK_SPEED_KMH = Decimal("30")
@@ -128,11 +133,23 @@ RECOMMENDATION_MATCHMAKING_ACTIONS = {
     "SOLICITUD_SERVICIO_CREADA",
 }
 PREQUOTATION_CURRENCY = "BOB"
+CLIENT_ACTIVE_SERVICE_STATES = {
+    "EN_ESPERA_ASIGNACION",
+    "ASIGNADO",
+    "EN_CAMINO",
+    "EN_SITIO",
+    "EN_DIAGNOSTICO_FISICO",
+    "EN_REPARACION",
+    "ESPERANDO_REPUESTOS",
+    "COMPLETADO_PENDIENTE_CONFIRMACION",
+    "FINALIZADO_PENDIENTE_PAGO",
+    "PAGADO",
+}
 
 
 def _build_service_query():
     return select(Servicio).options(
-        joinedload(Servicio.operario),
+        joinedload(Servicio.operario).joinedload(Operario.persona),
         joinedload(Servicio.informe),
         joinedload(Servicio.solicitud)
         .joinedload(SolicitudServicio.incidente)
@@ -1230,6 +1247,42 @@ def _build_client_prequotation_response(
     )
 
 
+def _build_client_active_service_summary(
+    service: Servicio,
+) -> ClientActiveServiceSummaryResponse:
+    incident = service.solicitud.incidente
+    operario_name = None
+    if service.operario is not None and service.operario.persona is not None:
+        operario_name = (
+            f"{service.operario.persona.nombre} {service.operario.persona.apellido}"
+        ).strip()
+
+    return ClientActiveServiceSummaryResponse(
+        service_id=service.id_servicio,
+        service_state=service.estado,
+        incident_id=incident.id_incidente,
+        incident_state=incident.estado,
+        workshop_name=service.solicitud.taller.nombre_comercial,
+        operario_name=operario_name or None,
+        detected_specialty=(
+            incident.especialidad_detectada.nombre
+            if incident.especialidad_detectada is not None
+            else None
+        ),
+        ai_summary=incident.diagnostico_ia_resumen,
+        prequotation_code=service.codigo_precotizacion,
+        prequotation_min=service.monto_precotizado_min,
+        prequotation_max=service.monto_precotizado_max,
+        prequotation_currency=(
+            PREQUOTATION_CURRENCY
+            if service.codigo_precotizacion is not None
+            else None
+        ),
+        created_at=service.created_at,
+        assigned_at=service.fecha_asignacion_operario,
+    )
+
+
 def _build_recommendation_context(
     *,
     db: Session,
@@ -1884,6 +1937,35 @@ def get_client_service_prequotation(
         service=service,
         payload=payload,
     )
+
+
+def list_client_active_services(
+    *,
+    current_user: Usuario,
+    db: Session,
+) -> list[ClientActiveServiceSummaryResponse]:
+    services = list(
+        db.scalars(
+            _build_service_query()
+            .join(
+                SolicitudServicio,
+                SolicitudServicio.id_solicitud == Servicio.id_solicitud,
+            )
+            .join(
+                Incidente,
+                Incidente.id_incidente == SolicitudServicio.id_incidente,
+            )
+            .where(
+                Incidente.id_cliente == current_user.id_persona,
+                Servicio.estado.in_(tuple(CLIENT_ACTIVE_SERVICE_STATES)),
+            )
+            .order_by(
+                Servicio.created_at.desc(),
+                Servicio.id_servicio.desc(),
+            )
+        )
+    )
+    return [_build_client_active_service_summary(item) for item in services]
 
 
 def register_notification_device(

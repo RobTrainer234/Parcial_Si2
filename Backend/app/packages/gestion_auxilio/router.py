@@ -15,6 +15,7 @@ from .schemas import (
     DeviceRegistrationResponse,
     DeviceUnregisterRequest,
     DispatchPendingResponse,
+    ClientActiveServiceSummaryResponse,
     FinalizationDecisionRequest,
     FinalizationDecisionResponse,
     FinalizationRequestResponse,
@@ -45,6 +46,7 @@ from .service import (
     hire_incident_workshop,
     get_incident_recommendations,
     get_client_service_prequotation,
+    list_client_active_services,
     decide_service_finalization,
     mark_notification_as_read,
     register_notification_device,
@@ -233,6 +235,20 @@ def client_service_finalization_decision(
         db=db,
         ip_origen=request.client.host if request.client is not None else None,
         user_agent=request.headers.get("user-agent"),
+    )
+
+
+@client_router.get(
+    "/services/active",
+    response_model=list[ClientActiveServiceSummaryResponse],
+)
+def client_active_services(
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> list[ClientActiveServiceSummaryResponse]:
+    return list_client_active_services(
+        current_user=current_user,
+        db=db,
     )
 
 

@@ -127,6 +127,45 @@ class WaitingAssignmentServiceSummary(BaseModel):
     assignment_timestamp: datetime | None = None
 
 
+class WorkshopServiceHistorySummary(BaseModel):
+    service_id: int
+    request_id: int
+    incident_id: int
+    service_state: str
+    incident_state: str
+    specialty: str | None = None
+    ai_summary: str | None = None
+    client_name: str | None = None
+    operario_id: int | None = None
+    operario_name: str | None = None
+    workshop_name: str
+    prequotation_code: str | None = None
+    estimated_min: Decimal | None = None
+    estimated_max: Decimal | None = None
+    final_amount: Decimal | None = None
+    payment_status: str | None = None
+    rating_average: Decimal | None = None
+    rating_comment: str | None = None
+    created_at: datetime
+    assigned_at: datetime | None = None
+    completed_at: datetime | None = None
+    paid_at: datetime | None = None
+
+
+class WorkshopServiceHistoryDetailResponse(WorkshopServiceHistorySummary):
+    client_description: str | None = None
+    incident_reference: str | None = None
+    detected_specialty: str | None = None
+    operario_availability: str | None = None
+    payment_amount: Decimal | None = None
+    payment_currency: str | None = None
+    trabajo_realizado: str | None = None
+    diagnostico_fisico: str | None = None
+    observaciones: str | None = None
+    recomendaciones: str | None = None
+    final_evidence_count: int = 0
+
+
 class OperarioCandidateSummary(BaseModel):
     id_persona_operario: int
     nombre_completo: str

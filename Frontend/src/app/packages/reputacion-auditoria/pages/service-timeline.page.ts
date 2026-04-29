@@ -15,6 +15,7 @@ import { ErrorStateComponent } from '../../../shared/components/error-state.comp
 import { LoadingStateComponent } from '../../../shared/components/loading-state.component';
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
+import { localizeStatusLabel } from '../../../shared/utils/user-facing-text';
 import { AuditApi } from '../data-access/audit.api';
 import { ServiceTimelineItem } from '../data-access/audit.models';
 
@@ -75,13 +76,13 @@ import { ServiceTimelineItem } from '../data-access/audit.models';
                   @if (item.service_state) {
                     <div class="timeline-item__row">
                       <span class="text-muted">Estado del servicio:</span>
-                      <span class="badge badge--info">{{ item.service_state }}</span>
+                      <span class="badge badge--info">{{ localizeStatus(item.service_state) }}</span>
                     </div>
                   }
                   @if (item.incident_state) {
                     <div class="timeline-item__row">
                       <span class="text-muted">Estado del incidente:</span>
-                      <span class="badge badge--neutral">{{ item.incident_state }}</span>
+                      <span class="badge badge--neutral">{{ localizeStatus(item.incident_state) }}</span>
                     </div>
                   }
                   @if (item.description) {
@@ -236,5 +237,9 @@ export class ServiceTimelinePage {
       dateStyle: 'medium',
       timeStyle: 'medium',
     }).format(date);
+  }
+
+  protected localizeStatus(value: string | null | undefined): string {
+    return localizeStatusLabel(value);
   }
 }

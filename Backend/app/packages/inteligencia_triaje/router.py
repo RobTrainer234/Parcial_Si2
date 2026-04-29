@@ -17,6 +17,7 @@ from .schemas import (
     MatchmakingStatusResponse,
     OperarioAssignedServiceSummary,
     OperarioStructuredProfileResponse,
+    SpecialtyResponse,
     StructuredProfileAcknowledgeResponse,
 )
 from .service import (
@@ -26,6 +27,7 @@ from .service import (
     get_matchmaking_status,
     get_operario_structured_profile,
     list_operario_assigned_services,
+    list_specialties,
     matchmake_incident,
     report_incident,
 )
@@ -33,6 +35,13 @@ from .service import (
 
 router = APIRouter(prefix="/triage", tags=["triage"])
 
+
+@router.get("/specialties", response_model=list[SpecialtyResponse])
+def triage_specialties(
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> list[SpecialtyResponse]:
+    return list_specialties(db)
 
 @router.post("/incidents/report", response_model=IncidentReportResponse, status_code=201)
 def report_vehicle_incident(

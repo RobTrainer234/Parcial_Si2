@@ -81,6 +81,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'services',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/service-history.page').then(
+            (m) => m.ServiceHistoryPage,
+          ),
+      },
+      {
         path: 'audit',
         loadComponent: () =>
           import('./packages/reputacion-auditoria/pages/audit-log.page').then(
