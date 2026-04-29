@@ -609,102 +609,78 @@ def logout_user() -> LogoutResponse:
 def start_client_registration(
     payload: ClientRegisterStartRequest,
     db: Session,
-) -> RegistrationStartResponse:
+) -> RegistrationVerifyResponse:
     _ensure_email_unique(db, payload.email)
     _ensure_ci_unique(db, payload.ci)
     _ensure_phone_unique(db, payload.telefono)
     _ensure_vehicle_plates_unique(db, payload.vehicles)
 
-    verification_code = generate_verification_code()
-    pending_payload = _build_client_pending_payload(payload)
     try:
-        return _create_pending_registration(
-            db=db,
-            flow="CLIENTE",
-            payload_json=pending_payload.model_dump(mode="json"),
-            verification_code=verification_code,
+        registration_data = _build_client_pending_payload(payload)
+
+        persona = Persona(
+            nombre=registration_data.nombre,
+            apellido=registration_data.apellido,
+            ci=registration_data.ci,
+            telefono=registration_data.telefono,
+            direccion=registration_data.direccion,
         )
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Client registration could not be started.",
-        ) from exc
+        db.add(persona)
+        db.flush()
 
-
-def verify_client_registration(
-    payload: RegistrationVerifyRequest,
-    db: Session,
-) -> RegistrationVerifyResponse:
-    pending_registration_id = _decode_pending_registration_token(
-        token=payload.registration_token,
-        expected_flow="CLIENTE",
-    )
-
-    try:
-        with db.begin():
-            pending = _load_pending_registration_for_verify(
-                db=db,
-                pending_registration_id=pending_registration_id,
-                expected_flow="CLIENTE",
-                verification_code=payload.verification_code,
+        db.add(
+            Usuario(
+                id_persona=persona.id_persona,
+                email=_normalize_email(registration_data.email),
+                password_hash=registration_data.password_hash,
+                tipo_usuario="CLIENTE",
+                activo=True,
             )
-            registration_data = PendingClientRegistrationPayload.model_validate(
-                pending.payload_json
+        )
+        db.add(Cliente(id_persona=persona.id_persona))
+        db.flush()
+
+        for vehicle in registration_data.vehicles:
+            modelo, color = _resolve_vehicle_catalogs(
+                db,
+                marca_nombre=vehicle.marca_nombre,
+                modelo_nombre=vehicle.modelo_nombre,
+                color_nombre=vehicle.color_nombre,
             )
-
-            _ensure_email_unique(db, registration_data.email)
-            _ensure_ci_unique(db, registration_data.ci)
-            _ensure_phone_unique(db, registration_data.telefono)
-            _ensure_vehicle_plates_unique(db, registration_data.vehicles)
-
-            persona = Persona(
-                nombre=registration_data.nombre,
-                apellido=registration_data.apellido,
-                ci=registration_data.ci,
-                telefono=registration_data.telefono,
-                direccion=registration_data.direccion,
-            )
-            db.add(persona)
-            db.flush()
-
             db.add(
-                Usuario(
+                Vehiculo(
+                    placa=_normalize_plate(vehicle.placa),
+                    id_modelo=modelo.id_modelo,
+                    anio=vehicle.anio,
+                    id_color=color.id_color,
                     id_persona=persona.id_persona,
-                    email=_normalize_email(registration_data.email),
-                    password_hash=registration_data.password_hash,
-                    tipo_usuario="CLIENTE",
                 )
             )
-            db.add(Cliente(id_persona=persona.id_persona))
-            db.flush()
 
-            for vehicle in registration_data.vehicles:
-                modelo, color = _resolve_vehicle_catalogs(
-                    db,
-                    marca_nombre=vehicle.marca_nombre,
-                    modelo_nombre=vehicle.modelo_nombre,
-                    color_nombre=vehicle.color_nombre,
-                )
-                db.add(
-                    Vehiculo(
-                        placa=_normalize_plate(vehicle.placa),
-                        id_modelo=modelo.id_modelo,
-                        anio=vehicle.anio,
-                        id_color=color.id_color,
-                        id_persona=persona.id_persona,
-                    )
-                )
+        db.commit()
 
-            pending.consumed_at = utc_now()
+        created_user = _get_user_by_email(db, registration_data.email)
+        if created_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Client registration did not persist user.",
+            )
+        if not verify_password(payload.password, created_user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Client registration stored invalid credentials.",
+            )
     except HTTPException:
+        db.rollback()
         raise
     except IntegrityError as exc:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Client registration conflicts with existing data.",
         ) from exc
     except SQLAlchemyError as exc:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Client registration failed.",
@@ -714,7 +690,17 @@ def verify_client_registration(
         status="created",
         role="CLIENTE",
         home_hint=build_home_hint("CLIENTE"),
-        created_vehicle_count=len(registration_data.vehicles),
+        created_vehicle_count=len(payload.vehicles),
+    )
+
+
+def verify_client_registration(
+    payload: RegistrationVerifyRequest,
+    db: Session,
+) -> RegistrationVerifyResponse:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Client registration no longer requires verification.",
     )
 
 

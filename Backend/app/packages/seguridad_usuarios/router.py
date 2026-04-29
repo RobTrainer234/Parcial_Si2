@@ -69,11 +69,11 @@ def logout(_: object = Depends(get_current_user)) -> LogoutResponse:
     return logout_user()
 
 
-@auth_router.post("/register/client/start", response_model=RegistrationStartResponse)
+@auth_router.post("/register/client/start", response_model=RegistrationVerifyResponse)
 def register_client_start(
     payload: ClientRegisterStartRequest,
     db: Session = Depends(get_db),
-) -> RegistrationStartResponse:
+) -> RegistrationVerifyResponse:
     return start_client_registration(payload, db)
 
 
