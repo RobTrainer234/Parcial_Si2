@@ -56,8 +56,9 @@ class _IncidentDiagnosisPageState extends ConsumerState<IncidentDiagnosisPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(incidentDiagnosisProvider(widget.incidentId));
-    final notifier =
-        ref.read(incidentDiagnosisProvider(widget.incidentId).notifier);
+    final notifier = ref.read(
+      incidentDiagnosisProvider(widget.incidentId).notifier,
+    );
     final classification = _lastClassification ?? notifier.lastClassification;
 
     return AppPageScaffold(
@@ -143,10 +144,27 @@ class _DiagnosisContent extends StatelessWidget {
   bool get _canGoToMatchmaking =>
       detail.isDiagnosed && detail.detectedSpecialty != null;
 
+  String? get _imageTechnicalMessage {
+    if (!detail.isDiagnosed) {
+      return null;
+    }
+    if (detail.imageCount <= 0 && detail.imageCountReceivedByBackend <= 0) {
+      return null;
+    }
+    if (detail.imageEvidenceNotSentToAi) {
+      return 'La IA no pudo analizar la imagen adjunta. Se usará diagnóstico general.';
+    }
+    if (detail.imageEvidenceAnalyzed) {
+      return 'La imagen fue analizada para orientar el diagnóstico.';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hasDifferentSuggestion = detail.detectedSpecialty != null &&
+    final hasDifferentSuggestion =
+        detail.detectedSpecialty != null &&
         detail.detectedSpecialty!.idEspecialidad !=
             detail.reportedSpecialty.idEspecialidad;
 
@@ -167,8 +185,9 @@ class _DiagnosisContent extends StatelessWidget {
               if (detail.detectedSpecialty != null)
                 _InfoItem(
                   label: 'Especialidad detectada',
-                  value:
-                      localizeSpecialtyLabel(detail.detectedSpecialty!.nombre),
+                  value: localizeSpecialtyLabel(
+                    detail.detectedSpecialty!.nombre,
+                  ),
                 ),
               if (_severity != null)
                 _InfoItem(
@@ -210,6 +229,28 @@ class _DiagnosisContent extends StatelessWidget {
             ],
           ),
         ),
+        if (_imageTechnicalMessage != null) ...[
+          const SizedBox(height: 16),
+          AppCard(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.image_search_outlined,
+                  size: 22,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _imageTechnicalMessage!,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         if (_hasDiagnosisSections) ...[
           const SizedBox(height: 16),
           AppCard(
@@ -360,10 +401,7 @@ class _DiagnosisContent extends StatelessWidget {
 }
 
 class _InfoItem extends StatelessWidget {
-  const _InfoItem({
-    required this.label,
-    required this.value,
-  });
+  const _InfoItem({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -384,10 +422,7 @@ class _InfoItem extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            value,
-            style: theme.textTheme.bodyLarge,
-          ),
+          Text(value, style: theme.textTheme.bodyLarge),
         ],
       ),
     );
@@ -420,10 +455,7 @@ class _DiagnosisSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            value,
-            style: theme.textTheme.bodyLarge,
-          ),
+          Text(value, style: theme.textTheme.bodyLarge),
         ],
       ),
     );
@@ -431,10 +463,7 @@ class _DiagnosisSection extends StatelessWidget {
 }
 
 class _DiagnosisNotice {
-  const _DiagnosisNotice({
-    required this.title,
-    required this.message,
-  });
+  const _DiagnosisNotice({required this.title, required this.message});
 
   final String title;
   final String message;
@@ -458,15 +487,9 @@ class _DiagnosisNoticeCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            notice.title,
-            style: theme.textTheme.titleMedium,
-          ),
+          Text(notice.title, style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
-          Text(
-            notice.message,
-            style: theme.textTheme.bodyMedium,
-          ),
+          Text(notice.message, style: theme.textTheme.bodyMedium),
           const SizedBox(height: 16),
           AppPrimaryButton(
             label: 'Intentar nuevamente',

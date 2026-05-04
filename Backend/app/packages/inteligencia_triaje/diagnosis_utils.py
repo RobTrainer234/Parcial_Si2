@@ -21,6 +21,9 @@ class TriageFallbackContent:
 @dataclass(frozen=True)
 class TriageDiagnosisDetails:
     detected_specialty: str | None
+    raw_detected_specialty: str | None
+    mapped_detected_specialty: str | None
+    specialty_override_reason: str | None
     severity: str | None
     confidence: Decimal | None
     specific_diagnosis: str | None
@@ -207,6 +210,8 @@ def build_triage_details_from_ai_result(
     provider_requires_manual_review: bool | None,
     min_confidence: int,
     image_count: int,
+    specialty_override_reason: str | None = None,
+    suppress_manual_review_reasons: set[str] | None = None,
 ) -> TriageDiagnosisDetails:
     fallback = _get_fallback_for_specialty(
         detected_specialty_name or raw_detected_specialty_name
@@ -253,8 +258,18 @@ def build_triage_details_from_ai_result(
     ):
         manual_review_reasons.append("inconsistent_response")
 
+    if suppress_manual_review_reasons:
+        manual_review_reasons = [
+            reason
+            for reason in manual_review_reasons
+            if reason not in suppress_manual_review_reasons
+        ]
+
     return TriageDiagnosisDetails(
         detected_specialty=detected_specialty_name or _normalize_text(raw_detected_specialty_name),
+        raw_detected_specialty=_normalize_text(raw_detected_specialty_name),
+        mapped_detected_specialty=detected_specialty_name,
+        specialty_override_reason=_normalize_text(specialty_override_reason),
         severity=_normalize_text(severity),
         confidence=confidence,
         specific_diagnosis=resolved_specific_diagnosis,
@@ -317,6 +332,14 @@ def build_triage_details_from_payload(
 
     return TriageDiagnosisDetails(
         detected_specialty=resolved_detected_specialty,
+        raw_detected_specialty=_normalize_text(safe_payload.get("raw_detected_specialty")),
+        mapped_detected_specialty=(
+            _normalize_text(safe_payload.get("mapped_detected_specialty"))
+            or _normalize_text(safe_payload.get("specialty_detected_mapped"))
+        ),
+        specialty_override_reason=_normalize_text(
+            safe_payload.get("specialty_override_reason")
+        ),
         severity=_normalize_text(severity)
         or _normalize_text(safe_payload.get("severity"))
         or _normalize_text(safe_payload.get("severidad")),
@@ -341,6 +364,23 @@ def build_triage_payload(
 ) -> dict[str, Any]:
     confidence_value = float(details.confidence) if details.confidence is not None else None
     payload = dict(raw_provider_result)
+    safe_provider_metadata = {
+        "provider": provider_metadata.get("provider"),
+        "model": provider_metadata.get("model"),
+        "vision_enabled": provider_metadata.get("vision_enabled"),
+        "image_count_received_by_backend": provider_metadata.get(
+            "image_count_received_by_backend"
+        ),
+        "image_count_sent_to_ai": provider_metadata.get("image_count_sent_to_ai"),
+        "image_mime_types": provider_metadata.get("image_mime_types"),
+        "image_bytes_total": provider_metadata.get("image_bytes_total"),
+        "used_image_evidence": provider_metadata.get("used_image_evidence"),
+        "raw_detected_specialty": details.raw_detected_specialty
+        or provider_metadata.get("raw_detected_specialty"),
+        "mapped_detected_specialty": details.mapped_detected_specialty,
+        "specialty_override_reason": details.specialty_override_reason,
+        "visual_evidence_tags": details.visual_evidence_tags,
+    }
     payload.update(
         {
             "summary": details.summary,
@@ -359,10 +399,30 @@ def build_triage_payload(
             "etiquetas_imagen": details.visual_evidence_tags or None,
             "requires_manual_review": details.requires_manual_review,
             "manual_review_reasons": details.manual_review_reasons,
+            "manual_review_reason": (
+                details.manual_review_reasons[0]
+                if details.manual_review_reasons
+                else None
+            ),
             "provider": provider_metadata.get("provider"),
             "model": provider_metadata.get("model"),
+            "vision_enabled": provider_metadata.get("vision_enabled"),
+            "image_count": provider_metadata.get("image_count"),
+            "image_count_received_by_backend": provider_metadata.get(
+                "image_count_received_by_backend"
+            ),
+            "image_count_sent_to_ai": provider_metadata.get("image_count_sent_to_ai"),
+            "image_mime_types": provider_metadata.get("image_mime_types"),
+            "image_bytes_total": provider_metadata.get("image_bytes_total"),
+            "used_image_evidence": provider_metadata.get("used_image_evidence"),
+            "image_omitted_reason": provider_metadata.get("image_omitted_reason"),
             "audio_included": provider_metadata.get("audio_included"),
             "audio_omitted_reason": provider_metadata.get("audio_omitted_reason"),
+            "provider_metadata": safe_provider_metadata,
+            "raw_detected_specialty": details.raw_detected_specialty
+            or provider_metadata.get("raw_detected_specialty"),
+            "mapped_detected_specialty": details.mapped_detected_specialty,
+            "specialty_override_reason": details.specialty_override_reason,
             "specialty_detected_mapped": details.detected_specialty,
             "triage_min_confidence": min_confidence,
             "manual_review_confidence_threshold": max(

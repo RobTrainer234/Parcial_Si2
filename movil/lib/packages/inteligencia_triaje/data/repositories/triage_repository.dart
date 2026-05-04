@@ -62,6 +62,7 @@ class TriageRepository {
           MultipartFile.fromBytes(
             bytes,
             filename: image.name,
+            contentType: _imageContentType(image),
           ),
         ),
       );
@@ -82,33 +83,31 @@ class TriageRepository {
   }
 
   Future<IncidentDetailModel> getIncidentDetail(int incidentId) async {
-    final response =
-        await _apiClient.get('/triage/incidents/$incidentId');
+    final response = await _apiClient.get('/triage/incidents/$incidentId');
     return IncidentDetailModel.fromJson(response as Map<String, dynamic>);
   }
 
-  Future<IncidentClassificationModel> classifyIncident(
-      int incidentId) async {
-    final response =
-        await _apiClient.post('/triage/incidents/$incidentId/classify');
+  Future<IncidentClassificationModel> classifyIncident(int incidentId) async {
+    final response = await _apiClient.post(
+      '/triage/incidents/$incidentId/classify',
+    );
     return IncidentClassificationModel.fromJson(
-        response as Map<String, dynamic>);
+      response as Map<String, dynamic>,
+    );
   }
 
-  Future<MatchmakingSelectionModel> matchmakeIncident(
-      int incidentId) async {
-    final response =
-        await _apiClient.post('/triage/incidents/$incidentId/matchmake');
-    return MatchmakingSelectionModel.fromJson(
-        response as Map<String, dynamic>);
+  Future<MatchmakingSelectionModel> matchmakeIncident(int incidentId) async {
+    final response = await _apiClient.post(
+      '/triage/incidents/$incidentId/matchmake',
+    );
+    return MatchmakingSelectionModel.fromJson(response as Map<String, dynamic>);
   }
 
-  Future<MatchmakingStatusModel> getMatchmakingStatus(
-      int incidentId) async {
-    final response =
-        await _apiClient.get('/triage/incidents/$incidentId/matchmaking');
-    return MatchmakingStatusModel.fromJson(
-        response as Map<String, dynamic>);
+  Future<MatchmakingStatusModel> getMatchmakingStatus(int incidentId) async {
+    final response = await _apiClient.get(
+      '/triage/incidents/$incidentId/matchmaking',
+    );
+    return MatchmakingStatusModel.fromJson(response as Map<String, dynamic>);
   }
 
   ApiException _mapDioException(DioException e) {
@@ -134,4 +133,16 @@ class TriageRepository {
       details: e.response?.data,
     );
   }
+}
+
+DioMediaType? _imageContentType(XFile image) {
+  final explicitMimeType = image.mimeType?.trim();
+  if (explicitMimeType != null && explicitMimeType.contains('/')) {
+    try {
+      return DioMediaType.parse(explicitMimeType);
+    } on FormatException {
+      // Fall back to filename inference below.
+    }
+  }
+  return MultipartFile.lookupMediaType(image.name);
 }

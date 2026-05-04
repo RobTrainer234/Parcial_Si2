@@ -59,14 +59,31 @@ class IncidentDetailModel {
   bool get isDiagnosed =>
       triageAt != null || aiSummary != null || detectedSpecialty != null;
 
+  int get imageCountReceivedByBackend =>
+      parseIntOrZero(aiJson?['image_count_received_by_backend']);
+
+  int get imageCountSentToAi =>
+      parseIntOrZero(aiJson?['image_count_sent_to_ai']);
+
+  bool get usedImageEvidence => _parseBool(aiJson?['used_image_evidence']);
+
+  bool get visionEnabled => _parseBool(aiJson?['vision_enabled']);
+
+  bool get imageEvidenceAnalyzed =>
+      imageCountReceivedByBackend > 0 &&
+      imageCountSentToAi > 0 &&
+      usedImageEvidence;
+
+  bool get imageEvidenceNotSentToAi =>
+      imageCountReceivedByBackend > 0 && imageCountSentToAi == 0;
+
   factory IncidentDetailModel.fromJson(Map<String, dynamic> json) {
     final evidenceSummary = json['evidence_summary'] as Map<String, dynamic>?;
     final aiJsonRaw = json['diagnostico_ia_json'];
     final aiJson = aiJsonRaw is Map<String, dynamic> ? aiJsonRaw : null;
 
     return IncidentDetailModel(
-      incidentId:
-          parseRequiredInt(json['incident_id'], field: 'incident_id'),
+      incidentId: parseRequiredInt(json['incident_id'], field: 'incident_id'),
       status: json['status'] as String? ?? '',
       fechaHora: parseDate(json['fecha_hora']),
       latitud: parseDoubleOrZero(json['latitud']),
@@ -83,18 +100,22 @@ class IncidentDetailModel {
             )
           : null,
       severity: json['severity'] as String?,
-      aiSummary: (json['summary'] as String?) ??
+      aiSummary:
+          (json['summary'] as String?) ??
           (json['diagnostico_ia_resumen'] as String?) ??
           (aiJson?['summary'] as String?) ??
           (aiJson?['resumen'] as String?),
-      specificDiagnosis: (json['specific_diagnosis'] as String?) ??
+      specificDiagnosis:
+          (json['specific_diagnosis'] as String?) ??
           (aiJson?['specific_diagnosis'] as String?),
-      suggestedService: (json['suggested_service'] as String?) ??
+      suggestedService:
+          (json['suggested_service'] as String?) ??
           (aiJson?['suggested_service'] as String?),
       customerRecommendation:
           (json['customer_recommendation'] as String?) ??
-              (aiJson?['customer_recommendation'] as String?),
-      operatorNotes: (json['operator_notes'] as String?) ??
+          (aiJson?['customer_recommendation'] as String?),
+      operatorNotes:
+          (json['operator_notes'] as String?) ??
           (aiJson?['operator_notes'] as String?),
       visualEvidenceTags: _parseVisualEvidenceTags(
         json['visual_evidence_tags'] ?? aiJson?['visual_evidence_tags'],
@@ -110,6 +131,16 @@ class IncidentDetailModel {
       audioCount: parseIntOrZero(evidenceSummary?['audio']),
     );
   }
+}
+
+bool _parseBool(dynamic value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is String) {
+    return value.trim().toLowerCase() == 'true';
+  }
+  return false;
 }
 
 List<String> _parseVisualEvidenceTags(dynamic value) {

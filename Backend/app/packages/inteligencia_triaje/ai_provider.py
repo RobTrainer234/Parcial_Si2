@@ -24,6 +24,12 @@ from app.core.config import get_settings
 GROQ_CHAT_COMPLETIONS_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 MAX_PROVIDER_RESPONSE_EXCERPT_CHARS = 1000
 MAX_PROVIDER_IMAGES = 5
+VISION_MODEL_MARKERS = (
+    "llama-4",
+    "vision",
+    "scout",
+    "maverick",
+)
 
 
 class TriageProviderError(Exception):
@@ -216,6 +222,13 @@ def _build_triage_prompt(
         f"Especialidades permitidas exactamente como catalogo backend: {allowed_specialties}. "
         f"Cantidad de imagenes adjuntas: {image_count}. "
         f"Descripcion del cliente: {description}. "
+        "Reglas visuales: si una imagen muestra claramente una llanta baja, pinchada, rueda danada o neumatico sin aire, "
+        "prefiere detected_specialty=\"Llantas\" cuando exista en el catalogo. "
+        "Si muestra bateria, bornes, capot abierto o bahia de motor y la descripcion menciona que no prende, no avanza o se apago, "
+        "prefiere detected_specialty=\"BATERIA\" o \"Electricidad\" segun la evidencia disponible. "
+        "Si muestra choque, vehiculo inmovil, remolque o dano que impide circular, usa \"GRUA\" o \"MECANICA_GENERAL\" segun severidad y catalogo. "
+        "Si la imagen no es clara, no es relevante o no permite identificar la falla, DIAGNOSTICO_GENERAL es aceptable y requiere revision manual. "
+        "Incluye etiquetas visuales normalizadas y utiles como flat_tire, tire, wheel, battery, engine_bay, hood_open, tow, crash o immobile cuando apliquen. "
         "Debes devolver SOLO un objeto JSON valido, sin markdown y sin texto adicional. "
         "detected_specialty debe ser exactamente uno de los nombres permitidos o null. "
         "No devuelvas una especialidad fuera del catalogo permitido. "
@@ -234,6 +247,13 @@ def _build_triage_prompt(
         '"suggested_tools": array de strings, "requires_tow": boolean, '
         '"observations": string | null, "requires_manual_review": boolean}.'
     )
+
+
+def _model_supports_vision(*, provider_name: str, model_name: str) -> bool:
+    if provider_name != "groq":
+        return False
+    normalized_model = model_name.strip().lower()
+    return any(marker in normalized_model for marker in VISION_MODEL_MARKERS)
 
 
 def _sanitize_provider_error_text(value: str | None) -> str | None:
@@ -413,20 +433,35 @@ def run_multimodal_triage(
 ) -> tuple[NormalizedTriageAIResult, dict[str, Any]]:
     settings = get_settings()
     provider_name, model_name, api_key = _get_triage_provider_settings()
+    image_mime_types = [image.mime_type for image in images]
+    image_bytes_total = sum(len(image.content_bytes) for image in images)
+    vision_enabled = _model_supports_vision(
+        provider_name=provider_name,
+        model_name=model_name,
+    )
+    images_for_provider = images[:MAX_PROVIDER_IMAGES] if vision_enabled else []
 
     prompt = _build_triage_prompt(
         description=description,
         reported_specialty_name=reported_specialty_name,
         specialty_names=specialty_names,
-        image_count=min(len(images), MAX_PROVIDER_IMAGES),
+        image_count=len(images_for_provider),
     )
 
     provider_metadata: dict[str, Any] = {
         "provider": provider_name,
         "model": model_name,
+        "vision_enabled": vision_enabled,
         "audio_included": False,
-        "image_count": min(len(images), MAX_PROVIDER_IMAGES),
+        "image_count": len(images_for_provider),
+        "image_count_received_by_backend": len(images),
+        "image_count_sent_to_ai": len(images_for_provider),
+        "image_mime_types": image_mime_types,
+        "image_bytes_total": image_bytes_total,
+        "used_image_evidence": bool(images_for_provider),
     }
+    if images and not images_for_provider:
+        provider_metadata["image_omitted_reason"] = "triage_model_without_vision_support"
     if audio is not None:
         provider_metadata["audio_omitted_reason"] = (
             "audio_not_supported_in_current_groq_triage"
@@ -438,7 +473,7 @@ def run_multimodal_triage(
         api_key=api_key,
         timeout_seconds=settings.triage_ai_timeout_seconds,
         prompt=prompt,
-        images=images,
+        images=images_for_provider,
     )
 
     response_text = _extract_text_from_provider_response(provider_response)
@@ -453,4 +488,5 @@ def run_multimodal_triage(
         raise TriageProviderInvalidResponseError("Provider returned invalid triage schema.") from exc
 
     provider_metadata["raw_response"] = raw_json
+    provider_metadata["raw_detected_specialty"] = raw_json.get("detected_specialty")
     return normalized, provider_metadata

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 import logging
@@ -1115,6 +1116,168 @@ def _map_detected_specialty(
     return specialty_map.get(normalized_name)
 
 
+def _get_catalog_specialty(
+    specialty_map: dict[str, Especialidad],
+    *names: str,
+) -> Especialidad | None:
+    for name in names:
+        specialty = specialty_map.get(_normalize_catalog_name(name))
+        if specialty is not None:
+            return specialty
+    return None
+
+
+def _text_contains_any(value: str | None, markers: Sequence[str]) -> bool:
+    if value is None:
+        return False
+    return any(marker in value for marker in markers)
+
+
+def _select_visual_specialty_override(
+    *,
+    specialty_map: dict[str, Especialidad],
+    visual_evidence_tags: Sequence[str],
+    description: str,
+) -> tuple[Especialidad | None, bool]:
+    normalized_tags = " ".join(
+        item
+        for tag in visual_evidence_tags
+        if (item := _normalize_catalog_name(tag))
+    )
+    normalized_description = _normalize_catalog_name(description)
+
+    if _text_contains_any(
+        normalized_tags,
+        (
+            "FLAT TIRE",
+            "TIRE",
+            "WHEEL",
+            "PINCHAZO",
+            "LLANTA",
+            "LLANTA BAJA",
+            "NEUMATICO",
+            "RUEDA",
+        ),
+    ):
+        return _get_catalog_specialty(specialty_map, "Llantas"), True
+
+    battery_visual_signal = _text_contains_any(
+        normalized_tags,
+        (
+            "BATTERY",
+            "BATERIA",
+            "ENGINE BAY",
+            "HOOD OPEN",
+            "CAPOT",
+            "COFRE",
+            "MOTOR",
+            "BORNE",
+            "NO START",
+            "ARRANQUE",
+        ),
+    )
+    no_start_description = _text_contains_any(
+        normalized_description,
+        (
+            "NO PRENDE",
+            "NO ENCIENDE",
+            "NO ARRANCA",
+            "NO AVANZA",
+            "SE APAGO",
+            "SE PARO",
+            "ME PARO",
+        ),
+    )
+    if battery_visual_signal and no_start_description:
+        return _get_catalog_specialty(specialty_map, "BATERIA", "Electricidad"), False
+
+    if _text_contains_any(
+        normalized_tags,
+        (
+            "TOW",
+            "GRUA",
+            "CRASH",
+            "CHOQUE",
+            "COLLISION",
+            "IMMOBILE",
+            "INMOVIL",
+            "ACCIDENTE",
+        ),
+    ):
+        return _get_catalog_specialty(
+            specialty_map,
+            "GRUA",
+            "MECANICA_GENERAL",
+            "Mecánica",
+        ), False
+
+    return None, False
+
+
+def _select_reported_specialty_fallback(incident: Incidente) -> Especialidad | None:
+    reported = incident.especialidad_reportada_cliente
+    if reported is None:
+        return None
+    normalized = _normalize_catalog_name(reported.nombre)
+    if normalized in {
+        None,
+        "DIAGNOSTICO GENERAL",
+        "MECANICA GENERAL",
+        "MECANICA",
+    }:
+        return None
+    return reported
+
+
+def _is_general_detected_specialty(
+    *,
+    detected_specialty: Especialidad | None,
+    raw_detected_specialty: str | None,
+) -> bool:
+    normalized_mapped = _normalize_catalog_name(
+        detected_specialty.nombre if detected_specialty is not None else None
+    )
+    normalized_raw = _normalize_catalog_name(raw_detected_specialty)
+    return "DIAGNOSTICO GENERAL" in {normalized_mapped, normalized_raw}
+
+
+def _is_generic_ai_text(value: str | None) -> bool:
+    normalized = _normalize_catalog_name(value)
+    if normalized is None:
+        return True
+    return _text_contains_any(
+        normalized,
+        (
+            "INFORMACION NO PERMITE",
+            "NO PERMITE IDENTIFICAR",
+            "FALLA ESPECIFICA",
+            "DIAGNOSTICO GENERAL",
+            "REVISION GENERAL",
+        ),
+    )
+
+
+def _dedupe_reasons(reasons: Sequence[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for reason in reasons:
+        normalized = reason.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _append_operator_note(current: str | None, note: str) -> str:
+    current_text = (current or "").strip()
+    if not current_text:
+        return note
+    if note in current_text:
+        return current_text
+    return f"{current_text} {note}"
+
+
 def _execute_incident_classification(
     *,
     incident: Incidente,
@@ -1146,6 +1309,57 @@ def _execute_incident_classification(
         raw_name=provider_result.detected_specialty,
     )
     confidence_value = Decimal(provider_result.confidence)
+    specialty_override_reason: str | None = None
+    suppress_manual_review_reasons: set[str] | None = None
+    if _is_general_detected_specialty(
+        detected_specialty=detected_specialty,
+        raw_detected_specialty=provider_result.detected_specialty,
+    ):
+        visual_override, suppress_vague_review = _select_visual_specialty_override(
+            specialty_map=specialty_map,
+            visual_evidence_tags=provider_result.visual_evidence_tags,
+            description=incident.descripcion_cliente,
+        )
+        if visual_override is not None:
+            detected_specialty = visual_override
+            specialty_override_reason = "visual_evidence_tags"
+            provider_metadata["specialty_override_reason"] = specialty_override_reason
+            if _normalize_catalog_name(visual_override.nombre) == "LLANTAS":
+                confidence_value = max(confidence_value, Decimal("75"))
+            if suppress_vague_review:
+                suppress_manual_review_reasons = {
+                    "low_confidence",
+                    "provider_requested_review",
+                    "vague_description",
+                }
+        else:
+            reported_override = _select_reported_specialty_fallback(incident)
+            if reported_override is not None:
+                detected_specialty = reported_override
+                specialty_override_reason = "client_reported_specialty"
+                provider_metadata["specialty_override_reason"] = specialty_override_reason
+
+    provider_metadata["mapped_detected_specialty"] = (
+        detected_specialty.nombre if detected_specialty is not None else None
+    )
+    provider_metadata["raw_detected_specialty"] = provider_result.detected_specialty
+    summary = provider_result.summary
+    specific_diagnosis = provider_result.specific_diagnosis
+    suggested_service = provider_result.suggested_service
+    customer_recommendation = provider_result.customer_recommendation
+    operator_notes = provider_result.operator_notes
+    if specialty_override_reason is not None:
+        if _is_generic_ai_text(summary):
+            summary = None
+        if _is_generic_ai_text(specific_diagnosis):
+            specific_diagnosis = None
+        if _is_generic_ai_text(suggested_service):
+            suggested_service = None
+        if _is_generic_ai_text(customer_recommendation):
+            customer_recommendation = None
+        if _is_generic_ai_text(operator_notes):
+            operator_notes = None
+
     triage_details = build_triage_details_from_ai_result(
         description=incident.descripcion_cliente,
         detected_specialty_name=(
@@ -1154,16 +1368,33 @@ def _execute_incident_classification(
         raw_detected_specialty_name=provider_result.detected_specialty,
         severity=provider_result.severity,
         confidence=confidence_value,
-        summary=provider_result.summary,
-        specific_diagnosis=provider_result.specific_diagnosis,
-        suggested_service=provider_result.suggested_service,
-        customer_recommendation=provider_result.customer_recommendation,
-        operator_notes=provider_result.operator_notes,
+        summary=summary,
+        specific_diagnosis=specific_diagnosis,
+        suggested_service=suggested_service,
+        customer_recommendation=customer_recommendation,
+        operator_notes=operator_notes,
         visual_evidence_tags=provider_result.visual_evidence_tags,
         provider_requires_manual_review=provider_result.requires_manual_review,
         min_confidence=settings.triage_min_confidence,
         image_count=len(images),
+        specialty_override_reason=specialty_override_reason,
+        suppress_manual_review_reasons=suppress_manual_review_reasons,
     )
+    if (
+        (provider_metadata.get("image_count_received_by_backend") or 0) > 0
+        and (provider_metadata.get("image_count_sent_to_ai") or 0) == 0
+    ):
+        triage_details = replace(
+            triage_details,
+            requires_manual_review=True,
+            manual_review_reasons=_dedupe_reasons(
+                [*triage_details.manual_review_reasons, "image_not_sent_to_ai"]
+            ),
+            operator_notes=_append_operator_note(
+                triage_details.operator_notes,
+                "El cliente adjunto imagenes, pero no pudieron ser analizadas automaticamente por el modelo configurado.",
+            ),
+        )
     manual_review_required = triage_details.requires_manual_review
 
     incident.diagnostico_ia_resumen = triage_details.summary
