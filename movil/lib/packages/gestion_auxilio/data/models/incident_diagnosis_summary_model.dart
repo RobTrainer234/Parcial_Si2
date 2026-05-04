@@ -10,6 +10,11 @@ class IncidentDiagnosisSummaryModel {
   final String? severity;
   final double? confidence;
   final String? aiSummary;
+  final String? specificDiagnosis;
+  final String? suggestedService;
+  final String? customerRecommendation;
+  final String? operatorNotes;
+  final List<String> visualEvidenceTags;
   final String? audioTranscript;
   final dynamic imageTags;
   final bool requiresManualReview;
@@ -26,6 +31,11 @@ class IncidentDiagnosisSummaryModel {
     this.severity,
     this.confidence,
     this.aiSummary,
+    this.specificDiagnosis,
+    this.suggestedService,
+    this.customerRecommendation,
+    this.operatorNotes,
+    this.visualEvidenceTags = const [],
     this.audioTranscript,
     this.imageTags,
     required this.requiresManualReview,
@@ -46,6 +56,14 @@ class IncidentDiagnosisSummaryModel {
       severity: json['severity'] as String?,
       confidence: parseNullableDouble(json['confidence']),
       aiSummary: json['ai_summary'] as String?,
+      specificDiagnosis: json['specific_diagnosis'] as String?,
+      suggestedService: json['suggested_service'] as String?,
+      customerRecommendation: json['customer_recommendation'] as String?,
+      operatorNotes: json['operator_notes'] as String?,
+      visualEvidenceTags: (json['visual_evidence_tags'] as List<dynamic>? ?? [])
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(),
       audioTranscript: json['transcripcion_audio'] as String?,
       imageTags: json['etiquetas_imagen'],
       requiresManualReview: json['requires_manual_review'] as bool? ?? false,

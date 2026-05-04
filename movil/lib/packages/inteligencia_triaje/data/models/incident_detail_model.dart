@@ -11,7 +11,13 @@ class IncidentDetailModel {
   final int vehicleId;
   final SpecialtySummaryModel reportedSpecialty;
   final SpecialtySummaryModel? detectedSpecialty;
+  final String? severity;
   final String? aiSummary;
+  final String? specificDiagnosis;
+  final String? suggestedService;
+  final String? customerRecommendation;
+  final String? operatorNotes;
+  final List<String> visualEvidenceTags;
   final Map<String, dynamic>? aiJson;
   final double? confidence;
   final String? audioTranscript;
@@ -32,7 +38,13 @@ class IncidentDetailModel {
     required this.vehicleId,
     required this.reportedSpecialty,
     this.detectedSpecialty,
+    this.severity,
     this.aiSummary,
+    this.specificDiagnosis,
+    this.suggestedService,
+    this.customerRecommendation,
+    this.operatorNotes,
+    this.visualEvidenceTags = const [],
     this.aiJson,
     this.confidence,
     this.audioTranscript,
@@ -50,6 +62,7 @@ class IncidentDetailModel {
   factory IncidentDetailModel.fromJson(Map<String, dynamic> json) {
     final evidenceSummary = json['evidence_summary'] as Map<String, dynamic>?;
     final aiJsonRaw = json['diagnostico_ia_json'];
+    final aiJson = aiJsonRaw is Map<String, dynamic> ? aiJsonRaw : null;
 
     return IncidentDetailModel(
       incidentId:
@@ -69,8 +82,24 @@ class IncidentDetailModel {
               json['especialidad_detectada'] as Map<String, dynamic>,
             )
           : null,
-      aiSummary: json['diagnostico_ia_resumen'] as String?,
-      aiJson: aiJsonRaw is Map<String, dynamic> ? aiJsonRaw : null,
+      severity: json['severity'] as String?,
+      aiSummary: (json['summary'] as String?) ??
+          (json['diagnostico_ia_resumen'] as String?) ??
+          (aiJson?['summary'] as String?) ??
+          (aiJson?['resumen'] as String?),
+      specificDiagnosis: (json['specific_diagnosis'] as String?) ??
+          (aiJson?['specific_diagnosis'] as String?),
+      suggestedService: (json['suggested_service'] as String?) ??
+          (aiJson?['suggested_service'] as String?),
+      customerRecommendation:
+          (json['customer_recommendation'] as String?) ??
+              (aiJson?['customer_recommendation'] as String?),
+      operatorNotes: (json['operator_notes'] as String?) ??
+          (aiJson?['operator_notes'] as String?),
+      visualEvidenceTags: _parseVisualEvidenceTags(
+        json['visual_evidence_tags'] ?? aiJson?['visual_evidence_tags'],
+      ),
+      aiJson: aiJson,
       confidence: parseNullableDouble(json['confianza_ia']),
       audioTranscript: json['transcripcion_audio'] as String?,
       imageTags: json['etiquetas_imagen'],
@@ -81,4 +110,14 @@ class IncidentDetailModel {
       audioCount: parseIntOrZero(evidenceSummary?['audio']),
     );
   }
+}
+
+List<String> _parseVisualEvidenceTags(dynamic value) {
+  if (value is List) {
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+  return const [];
 }

@@ -24,8 +24,7 @@ class IncidentDiagnosisPage extends ConsumerStatefulWidget {
       _IncidentDiagnosisPageState();
 }
 
-class _IncidentDiagnosisPageState
-    extends ConsumerState<IncidentDiagnosisPage> {
+class _IncidentDiagnosisPageState extends ConsumerState<IncidentDiagnosisPage> {
   bool _isRunning = false;
   IncidentClassificationModel? _lastClassification;
   _DiagnosisNotice? _notice;
@@ -62,10 +61,10 @@ class _IncidentDiagnosisPageState
     final classification = _lastClassification ?? notifier.lastClassification;
 
     return AppPageScaffold(
-      label: 'DIAGNÓSTICO',
-      title: 'Diagnóstico del incidente',
+      label: 'DIAGNOSTICO',
+      title: 'Diagnostico del incidente',
       subtitle:
-          'Revisamos la información reportada para orientar la asistencia.',
+          'Revisamos la informacion reportada para orientar la asistencia.',
       actions: IconButton(
         tooltip: 'Volver',
         onPressed: () {
@@ -78,7 +77,7 @@ class _IncidentDiagnosisPageState
         icon: const Icon(Icons.arrow_back_rounded),
       ),
       child: state.when(
-        loading: () => const AppLoading(message: 'Cargando diagnóstico...'),
+        loading: () => const AppLoading(message: 'Cargando diagnostico...'),
         error: (error, _) => AppErrorView(
           message: _mapDiagnosisError(error),
           onRetry: () => ref
@@ -115,12 +114,34 @@ class _DiagnosisContent extends StatelessWidget {
   final bool isRunning;
   final VoidCallback onRunDiagnosis;
 
-  String? get _severity => classification?.severity;
+  String? get _severity => classification?.severity ?? detail.severity;
   double? get _confidence => classification?.confidence ?? detail.confidence;
+  String? get _summary => detail.aiSummary ?? classification?.summary;
+  String? get _specificDiagnosis =>
+      detail.specificDiagnosis ?? classification?.specificDiagnosis;
+  String? get _suggestedService =>
+      detail.suggestedService ?? classification?.suggestedService;
+  String? get _customerRecommendation =>
+      detail.customerRecommendation ?? classification?.customerRecommendation;
+  String? get _operatorNotes =>
+      detail.operatorNotes ?? classification?.operatorNotes;
+  List<String> get _visualEvidenceTags {
+    if (detail.visualEvidenceTags.isNotEmpty) {
+      return detail.visualEvidenceTags;
+    }
+    return classification?.visualEvidenceTags ?? const [];
+  }
+
+  bool get _hasDiagnosisSections =>
+      _specificDiagnosis != null ||
+      _suggestedService != null ||
+      _customerRecommendation != null ||
+      _operatorNotes != null ||
+      _visualEvidenceTags.isNotEmpty ||
+      (_summary != null && _summary!.trim().isNotEmpty);
+
   bool get _canGoToMatchmaking =>
-      detail.isDiagnosed &&
-      !detail.requiresManualReview &&
-      detail.detectedSpecialty != null;
+      detail.isDiagnosed && detail.detectedSpecialty != null;
 
   @override
   Widget build(BuildContext context) {
@@ -141,15 +162,19 @@ class _DiagnosisContent extends StatelessWidget {
               ),
               _InfoItem(
                 label: 'Sospecha inicial del cliente',
-                value: detail.reportedSpecialty.nombre,
+                value: localizeSpecialtyLabel(detail.reportedSpecialty.nombre),
               ),
               if (detail.detectedSpecialty != null)
                 _InfoItem(
-                  label: 'Diagnóstico sugerido por IA',
-                  value: detail.detectedSpecialty!.nombre,
+                  label: 'Especialidad detectada',
+                  value:
+                      localizeSpecialtyLabel(detail.detectedSpecialty!.nombre),
                 ),
               if (_severity != null)
-                _InfoItem(label: 'Severidad', value: _severity!),
+                _InfoItem(
+                  label: 'Severidad',
+                  value: localizeStatusLabel(_severity),
+                ),
               if (_confidence != null)
                 _InfoItem(
                   label: 'Confianza',
@@ -161,7 +186,7 @@ class _DiagnosisContent extends StatelessWidget {
                     '${detail.imageCount} foto(s) y ${detail.audioCount} audio(s)',
               ),
               _InfoItem(
-                label: 'Ubicación',
+                label: 'Ubicacion',
                 value:
                     '${detail.latitud.toStringAsFixed(4)}, ${detail.longitud.toStringAsFixed(4)}',
               ),
@@ -174,7 +199,7 @@ class _DiagnosisContent extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Descripción del incidente',
+                'Descripcion del incidente',
                 style: theme.textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
@@ -185,7 +210,7 @@ class _DiagnosisContent extends StatelessWidget {
             ],
           ),
         ),
-        if (detail.aiSummary != null && detail.aiSummary!.trim().isNotEmpty) ...[
+        if (_hasDiagnosisSections) ...[
           const SizedBox(height: 16),
           AppCard(
             child: Column(
@@ -200,16 +225,43 @@ class _DiagnosisContent extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Resumen del diagnóstico',
+                      'Diagnostico orientativo',
                       style: theme.textTheme.titleMedium,
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                Text(
-                  detail.aiSummary!,
-                  style: theme.textTheme.bodyMedium,
-                ),
+                if (_specificDiagnosis != null)
+                  _DiagnosisSection(
+                    title: 'Diagnóstico específico',
+                    value: _specificDiagnosis!,
+                  ),
+                if (_suggestedService != null)
+                  _DiagnosisSection(
+                    title: 'Servicio sugerido',
+                    value: _suggestedService!,
+                  ),
+                if (_customerRecommendation != null)
+                  _DiagnosisSection(
+                    title: 'Recomendacion para el cliente',
+                    value: _customerRecommendation!,
+                  ),
+                if (_operatorNotes != null)
+                  _DiagnosisSection(
+                    title: 'Notas para el taller / operario',
+                    value: _operatorNotes!,
+                  ),
+                if (_visualEvidenceTags.isNotEmpty)
+                  _DiagnosisSection(
+                    title: 'Evidencias visuales',
+                    value: _visualEvidenceTags.join(', '),
+                  ),
+                if (_summary != null && _summary!.trim().isNotEmpty)
+                  _DiagnosisSection(
+                    title: 'Resumen final',
+                    value: _summary!,
+                    isLast: true,
+                  ),
               ],
             ),
           ),
@@ -218,7 +270,7 @@ class _DiagnosisContent extends StatelessWidget {
           const SizedBox(height: 16),
           AppCard(
             child: Text(
-              'La IA encontró una posible causa distinta a la sospecha inicial.',
+              'La IA encontro una posible causa distinta a la sospecha inicial.',
               style: theme.textTheme.bodyMedium,
             ),
           ),
@@ -237,7 +289,7 @@ class _DiagnosisContent extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Este incidente requiere revisión manual antes de buscar talleres.',
+                    'La IA no tiene certeza completa. El taller realizará diagnóstico físico.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: Colors.orange.shade700,
                     ),
@@ -259,13 +311,13 @@ class _DiagnosisContent extends StatelessWidget {
         if (!detail.isDiagnosed) ...[
           AppCard(
             child: Text(
-              'Usaremos la descripción, ubicación y evidencias para sugerir el tipo de asistencia.',
+              'Usaremos la descripcion, ubicacion y evidencias para sugerir el tipo de asistencia.',
               style: theme.textTheme.bodyMedium,
             ),
           ),
           const SizedBox(height: 12),
           AppPrimaryButton(
-            label: 'Generar diagnóstico',
+            label: 'Generar diagnostico',
             icon: Icons.analytics_outlined,
             isLoading: isRunning,
             onPressed: isRunning ? null : onRunDiagnosis,
@@ -296,7 +348,7 @@ class _DiagnosisContent extends StatelessWidget {
       case 'EN_TRIAJE':
         return 'Analizando incidente';
       case 'DIAGNOSTICADO':
-        return 'Diagnóstico listo';
+        return 'Diagnostico listo';
       case 'EN_MATCHMAKING':
         return 'Buscando taller compatible';
       case 'EN_PROCESO':
@@ -327,6 +379,42 @@ class _InfoItem extends StatelessWidget {
         children: [
           Text(
             label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.bodyLarge,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiagnosisSection extends StatelessWidget {
+  const _DiagnosisSection({
+    required this.title,
+    required this.value,
+    this.isLast = false,
+  });
+
+  final String title;
+  final String value;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -395,42 +483,42 @@ class _DiagnosisNoticeCard extends StatelessWidget {
 String _mapDiagnosisError(Object error) {
   if (error is ApiException) {
     if (error.statusCode == 404) {
-      return 'No se encontró el incidente.';
+      return 'No se encontro el incidente.';
     }
     if (error.statusCode == 409) {
-      return 'El incidente aún no está listo para diagnóstico.';
+      return 'El incidente aun no esta listo para diagnostico.';
     }
     if (error.statusCode == 502 || error.statusCode == 503) {
-      return 'El diagnóstico por IA no está disponible en este momento.';
+      return 'El diagnostico por IA no esta disponible en este momento.';
     }
     if (error.statusCode == 401 || error.statusCode == 403) {
-      return 'Tu sesión expiró. Inicia sesión nuevamente.';
+      return 'Tu sesion expiro. Inicia sesion nuevamente.';
     }
     if (error.statusCode != null && error.statusCode! >= 500) {
-      return 'No se pudo procesar el diagnóstico por un problema del servidor.';
+      return 'No se pudo procesar el diagnostico por un problema del servidor.';
     }
   }
-  return 'No se pudo conectar con el servidor. Revisa tu conexión.';
+  return 'No se pudo conectar con el servidor. Revisa tu conexion.';
 }
 
 _DiagnosisNotice _mapDiagnosisNotice(Object error) {
   if (error is ApiException) {
     if (error.statusCode == 502 || error.statusCode == 503) {
       return const _DiagnosisNotice(
-        title: 'Diagnóstico no disponible',
+        title: 'Diagnostico no disponible',
         message:
-            'No pudimos generar el diagnóstico automático en este momento. Puedes intentar nuevamente más tarde.',
+            'No pudimos generar el diagnostico automatico en este momento. Puedes intentar nuevamente mas tarde.',
       );
     }
     if (error.statusCode == 409) {
       return const _DiagnosisNotice(
-        title: 'Diagnóstico pendiente',
-        message: 'El incidente aún no está listo para ser diagnosticado.',
+        title: 'Diagnostico pendiente',
+        message: 'El incidente aun no esta listo para ser diagnosticado.',
       );
     }
   }
   return _DiagnosisNotice(
-    title: 'No se pudo generar el diagnóstico',
+    title: 'No se pudo generar el diagnostico',
     message: _mapDiagnosisError(error),
   );
 }

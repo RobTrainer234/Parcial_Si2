@@ -35,6 +35,9 @@ from app.models import (
 )
 from app.packages.seguridad_usuarios.security import hash_password
 from app.packages.inteligencia_triaje.matchmaking import build_ranked_candidate
+from app.packages.inteligencia_triaje.diagnosis_utils import (
+    build_triage_details_from_payload,
+)
 from app.packages.inteligencia_triaje.service import rematch_incident_after_workshop_rejection
 from app.packages.inteligencia_triaje.storage import (
     build_public_media_url,
@@ -827,11 +830,6 @@ def _validate_prequotation_prerequisites(incident: Incidente) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="Incident triage is incomplete for technical prequotation.",
         )
-    if incident.requiere_revision_manual:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Incident still requires manual review before technical prequotation.",
-        )
 
 
 def _get_catalog_match_text(incident: Incidente) -> str:
@@ -1303,7 +1301,6 @@ def _validate_service_assignment_eligible(service: Servicio) -> Incidente:
         incident.id_especialidad_detectada is None
         or incident.severidad is None
         or incident.fecha_triaje is None
-        or incident.requiere_revision_manual
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -3310,11 +3307,24 @@ def _serialize_request_detail(
     db: Session,
 ) -> WorkshopRequestDetailResponse:
     service = request_row.servicio
+    incident = request_row.incidente
+    triage_details = build_triage_details_from_payload(
+        payload=incident.diagnostico_ia_json,
+        detected_specialty_name=(
+            incident.especialidad_detectada.nombre
+            if incident.especialidad_detectada is not None
+            else None
+        ),
+        summary=incident.diagnostico_ia_resumen,
+        severity=incident.severidad,
+        confidence=incident.confianza_ia,
+        requires_manual_review=incident.requiere_revision_manual,
+    )
     return WorkshopRequestDetailResponse(
         request_id=request_row.id_solicitud,
         request_status=request_row.estado,
         incident_id=request_row.id_incidente,
-        incident_state=request_row.incidente.estado,
+        incident_state=incident.estado,
         workshop=_build_workshop_summary(request_row),
         sent_at=request_row.fecha_envio,
         expires_at=request_row.fecha_expiracion,
@@ -3325,16 +3335,21 @@ def _serialize_request_detail(
         score_proximidad=request_row.score_proximidad,
         score_reputacion=request_row.score_reputacion,
         score_total=request_row.score_total,
-        incident_latitud=request_row.incidente.latitud,
-        incident_longitud=request_row.incidente.longitud,
+        incident_latitud=incident.latitud,
+        incident_longitud=incident.longitud,
         client_reported_specialty=_build_specialty_summary(
-            request_row.incidente.especialidad_reportada_cliente
+            incident.especialidad_reportada_cliente
         ),
-        detected_specialty=_build_specialty_summary(request_row.incidente.especialidad_detectada),
-        severity=request_row.incidente.severidad,
-        ai_summary=request_row.incidente.diagnostico_ia_resumen,
-        transcripcion_audio=request_row.incidente.transcripcion_audio,
-        image_labels=request_row.incidente.etiquetas_imagen,
+        detected_specialty=_build_specialty_summary(incident.especialidad_detectada),
+        severity=incident.severidad,
+        ai_summary=triage_details.summary,
+        specific_diagnosis=triage_details.specific_diagnosis,
+        suggested_service=triage_details.suggested_service,
+        customer_recommendation=triage_details.customer_recommendation,
+        operator_notes=triage_details.operator_notes,
+        visual_evidence_tags=triage_details.visual_evidence_tags,
+        transcripcion_audio=incident.transcripcion_audio,
+        image_labels=incident.etiquetas_imagen,
         service_id=service.id_servicio if service is not None else None,
         service_state=service.estado if service is not None else None,
         prequotation_code=service.codigo_precotizacion if service is not None else None,

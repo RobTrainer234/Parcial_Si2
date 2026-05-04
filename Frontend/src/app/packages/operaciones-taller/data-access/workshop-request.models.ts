@@ -45,6 +45,11 @@ export interface WorkshopRequestDetailResponse {
   detected_specialty?: SpecialtySummaryResponse | null;
   severity?: string | null;
   ai_summary?: string | null;
+  specific_diagnosis?: string | null;
+  suggested_service?: string | null;
+  customer_recommendation?: string | null;
+  operator_notes?: string | null;
+  visual_evidence_tags?: string[] | null;
   transcripcion_audio?: string | null;
   image_labels?: string[] | Record<string, unknown> | null;
   service_id?: number | null;

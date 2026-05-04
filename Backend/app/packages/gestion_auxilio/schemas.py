@@ -282,6 +282,11 @@ class IncidentDiagnosisSummaryResponse(BaseModel):
     severity: str | None = None
     confidence: Decimal | None = None
     ai_summary: str | None = None
+    specific_diagnosis: str | None = None
+    suggested_service: str | None = None
+    customer_recommendation: str | None = None
+    operator_notes: str | None = None
+    visual_evidence_tags: list[str] = Field(default_factory=list)
     transcripcion_audio: str | None = None
     etiquetas_imagen: dict[str, object] | list[object] | None = None
     requires_manual_review: bool

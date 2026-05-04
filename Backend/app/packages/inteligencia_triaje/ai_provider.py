@@ -9,7 +9,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib import error, request
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 from app.core.config import get_settings
 
@@ -58,19 +65,52 @@ class AIMediaInput:
 
 
 class NormalizedTriageAIResult(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, populate_by_name=True)
 
-    resumen: str = Field(min_length=1)
-    severidad: str
-    especialidad_detectada_nombre: str | None = None
-    confianza: Decimal = Field(ge=0, le=100)
-    transcripcion_audio: str | None = None
-    etiquetas_imagen: list[str] | dict[str, Any] | None = None
-    herramientas_sugeridas: list[str] = Field(default_factory=list)
-    requiere_grua: bool = False
-    observaciones: str | None = None
+    summary: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("summary", "resumen"),
+    )
+    severity: str = Field(validation_alias=AliasChoices("severity", "severidad"))
+    detected_specialty: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "detected_specialty",
+            "especialidad_detectada_nombre",
+        ),
+    )
+    confidence: Decimal = Field(
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices("confidence", "confianza"),
+    )
+    specific_diagnosis: str | None = None
+    suggested_service: str | None = None
+    customer_recommendation: str | None = None
+    operator_notes: str | None = None
+    audio_transcript: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("audio_transcript", "transcripcion_audio"),
+    )
+    visual_evidence_tags: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("visual_evidence_tags", "etiquetas_imagen"),
+    )
+    suggested_tools: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("suggested_tools", "herramientas_sugeridas"),
+    )
+    requires_tow: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("requires_tow", "requiere_grua"),
+    )
+    observations: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("observations", "observaciones"),
+    )
+    requires_manual_review: bool | None = None
 
-    @field_validator("severidad")
+    @field_validator("severity")
     @classmethod
     def normalize_severity(cls, value: str) -> str:
         normalized = value.strip().upper()
@@ -79,7 +119,7 @@ class NormalizedTriageAIResult(BaseModel):
             raise ValueError("Invalid severity.")
         return normalized
 
-    @field_validator("especialidad_detectada_nombre")
+    @field_validator("detected_specialty")
     @classmethod
     def normalize_specialty_name(cls, value: str | None) -> str | None:
         if value is None:
@@ -87,12 +127,20 @@ class NormalizedTriageAIResult(BaseModel):
         normalized = " ".join(value.split()).upper()
         return normalized or None
 
-    @field_validator("herramientas_sugeridas")
+    @field_validator("suggested_tools")
     @classmethod
     def normalize_tools(cls, value: list[str]) -> list[str]:
         return [" ".join(item.split()) for item in value if " ".join(item.split())]
 
-    @field_validator("transcripcion_audio", "observaciones")
+    @field_validator(
+        "summary",
+        "specific_diagnosis",
+        "suggested_service",
+        "customer_recommendation",
+        "operator_notes",
+        "audio_transcript",
+        "observations",
+    )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -100,14 +148,37 @@ class NormalizedTriageAIResult(BaseModel):
         normalized = " ".join(value.split())
         return normalized or None
 
-    @field_validator("transcripcion_audio")
+    @field_validator("audio_transcript")
     @classmethod
     def enforce_audio_null(cls, value: str | None) -> str | None:
         if value is not None:
             raise ValueError("Audio transcription is not supported in Groq triage.")
         return value
 
-    @field_validator("confianza", mode="before")
+    @field_validator("visual_evidence_tags", mode="before")
+    @classmethod
+    def normalize_visual_tags(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            normalized = " ".join(value.split())
+            return [normalized] if normalized else []
+        if isinstance(value, dict):
+            tags = [
+                " ".join(str(key).split())
+                for key, item in value.items()
+                if " ".join(str(key).split()) and item not in (None, False, "", 0)
+            ]
+            return tags
+        if isinstance(value, list):
+            return [
+                " ".join(str(item).split())
+                for item in value
+                if " ".join(str(item).split())
+            ]
+        raise ValueError("visual_evidence_tags must be a list, object or null.")
+
+    @field_validator("confidence", mode="before")
     @classmethod
     def normalize_confidence_scale(cls, value: Any) -> Decimal:
         try:
@@ -138,23 +209,30 @@ def _build_triage_prompt(
         "Eres un clasificador tecnico preliminar para auxilio vehicular. "
         "Analiza solamente la descripcion del cliente y las imagenes adjuntas. "
         "No inventes hechos que no esten visibles o descritos. "
+        "No sobreafirmes ni presentes certezas falsas. "
+        "Cuando la evidencia no sea concluyente usa expresiones como posible, probable o se recomienda revisar. "
         "La sospecha inicial reportada por el cliente es: "
         f"{reported_specialty_name}. "
         f"Especialidades permitidas exactamente como catalogo backend: {allowed_specialties}. "
         f"Cantidad de imagenes adjuntas: {image_count}. "
         f"Descripcion del cliente: {description}. "
         "Debes devolver SOLO un objeto JSON valido, sin markdown y sin texto adicional. "
-        "La clave transcripcion_audio debe ser siempre null porque el audio no se procesa. "
-        "La clave especialidad_detectada_nombre debe ser exactamente uno de los nombres permitidos o null. "
-        "La clave confianza debe ser un numero entre 0 y 100, no entre 0 y 1. "
+        "detected_specialty debe ser exactamente uno de los nombres permitidos o null. "
+        "No devuelvas una especialidad fuera del catalogo permitido. "
+        "confidence debe ser un numero entre 0 y 100, no entre 0 y 1. "
         "Ejemplo: usa 90 para 90%, no 0.90. "
-        "Si no estas seguro, usa especialidad_detectada_nombre null, confianza baja y observaciones explicando la incertidumbre. "
+        "audio_transcript debe ser siempre null porque el audio no se procesa. "
+        "visual_evidence_tags debe ser un arreglo corto de etiquetas legibles. "
+        "Si la descripcion o las imagenes son ambiguas, elige DIAGNOSTICO_GENERAL o MECANICA_GENERAL cuando exista en el catalogo y marca requires_manual_review=true. "
+        "Si no estas seguro, conserva una especialidad permitida amplia, baja la confianza y explica la incertidumbre en summary u observations. "
         "Estructura JSON obligatoria: "
-        '{"resumen": string, "severidad": "BAJA" | "MEDIA" | "ALTA" | "CRITICA", '
-        '"especialidad_detectada_nombre": string | null, "confianza": number, '
-        '"transcripcion_audio": null, "etiquetas_imagen": array | object | null, '
-        '"herramientas_sugeridas": array de strings, "requiere_grua": boolean, '
-        '"observaciones": string | null}.'
+        '{"summary": string, "severity": "BAJA" | "MEDIA" | "ALTA", '
+        '"detected_specialty": string | null, "confidence": number, '
+        '"specific_diagnosis": string | null, "suggested_service": string | null, '
+        '"customer_recommendation": string | null, "operator_notes": string | null, '
+        '"audio_transcript": null, "visual_evidence_tags": array de strings, '
+        '"suggested_tools": array de strings, "requires_tow": boolean, '
+        '"observations": string | null, "requires_manual_review": boolean}.'
     )
 
 

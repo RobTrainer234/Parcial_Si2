@@ -38,6 +38,13 @@ from .ai_provider import (
     TriageProviderNotConfiguredError,
     run_multimodal_triage,
 )
+from .diagnosis_utils import (
+    TriageDiagnosisDetails,
+    build_triage_details_from_ai_result,
+    build_triage_details_from_payload,
+    build_triage_payload,
+    normalize_catalog_name,
+)
 from .matchmaking import RankedWorkshopCandidate, build_ranked_candidate, candidate_sort_key
 from .schemas import (
     IncidentClassificationResponse,
@@ -68,7 +75,7 @@ from .storage import (
 
 MAX_IMAGE_FILES = 5
 TRIAGE_ELIGIBLE_STATES = {"EN_TRIAJE", "DIAGNOSTICADO"}
-MATCHMAKING_ELIGIBLE_STATES = {"DIAGNOSTICADO", "EN_MATCHMAKING"}
+MATCHMAKING_ELIGIBLE_STATES = {"EN_TRIAJE", "DIAGNOSTICADO", "EN_MATCHMAKING"}
 OPERARIO_PROFILE_ALLOWED_SERVICE_STATES = {
     "ASIGNADO",
     "EN_CAMINO",
@@ -223,14 +230,28 @@ def _build_specialty_summary(specialty: Especialidad | None) -> SpecialtySummary
 
 
 def _normalize_catalog_name(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = " ".join(value.split()).upper()
-    return normalized or None
+    return normalize_catalog_name(value)
+
+
+def _build_triage_details(incident: Incidente) -> TriageDiagnosisDetails:
+    detected_specialty_name = (
+        incident.especialidad_detectada.nombre
+        if incident.especialidad_detectada is not None
+        else None
+    )
+    return build_triage_details_from_payload(
+        payload=incident.diagnostico_ia_json,
+        detected_specialty_name=detected_specialty_name,
+        summary=incident.diagnostico_ia_resumen,
+        severity=incident.severidad,
+        confidence=incident.confianza_ia,
+        requires_manual_review=incident.requiere_revision_manual,
+    )
 
 
 def _build_incident_detail_response(incident: Incidente) -> IncidentDetailResponse:
     ordered_evidences = sorted(incident.evidencias, key=lambda item: item.id_evidencia)
+    triage_details = _build_triage_details(incident)
     return IncidentDetailResponse(
         incident_id=incident.id_incidente,
         status=incident.estado,
@@ -241,7 +262,14 @@ def _build_incident_detail_response(incident: Incidente) -> IncidentDetailRespon
         id_vehiculo=incident.id_vehiculo,
         especialidad_reportada=_build_specialty_summary(incident.especialidad_reportada_cliente),
         especialidad_detectada=_build_specialty_summary(incident.especialidad_detectada),
+        severity=triage_details.severity,
         diagnostico_ia_resumen=incident.diagnostico_ia_resumen,
+        summary=triage_details.summary,
+        specific_diagnosis=triage_details.specific_diagnosis,
+        suggested_service=triage_details.suggested_service,
+        customer_recommendation=triage_details.customer_recommendation,
+        operator_notes=triage_details.operator_notes,
+        visual_evidence_tags=triage_details.visual_evidence_tags,
         diagnostico_ia_json=incident.diagnostico_ia_json,
         confianza_ia=incident.confianza_ia,
         transcripcion_audio=incident.transcripcion_audio,
@@ -318,11 +346,6 @@ def _validate_structured_profile_ready(service: Servicio) -> Incidente:
             status_code=status.HTTP_409_CONFLICT,
             detail="AI triage result is not ready for this service.",
         )
-    if incident.requiere_revision_manual:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Incident still requires manual review before operario briefing.",
-        )
     return incident
 
 
@@ -349,6 +372,7 @@ def _build_operario_structured_profile_response(
     incident = service.solicitud.incidente
     ordered_evidences = sorted(incident.evidencias, key=lambda item: item.id_evidencia)
     diagnostico = incident.diagnostico_ia_json or {}
+    triage_details = _build_triage_details(incident)
     return OperarioStructuredProfileResponse(
         service_id=service.id_servicio,
         service_state=service.estado,
@@ -367,13 +391,23 @@ def _build_operario_structured_profile_response(
         severity=incident.severidad,
         confidence=incident.confianza_ia,
         ai_summary=incident.diagnostico_ia_resumen,
+        summary=triage_details.summary,
+        specific_diagnosis=triage_details.specific_diagnosis,
+        suggested_service=triage_details.suggested_service,
+        customer_recommendation=triage_details.customer_recommendation,
+        operator_notes=triage_details.operator_notes,
+        visual_evidence_tags=triage_details.visual_evidence_tags,
         transcripcion_audio=incident.transcripcion_audio,
         etiquetas_imagen=incident.etiquetas_imagen,
         herramientas_sugeridas=_extract_profile_list(
-            diagnostico.get("herramientas_sugeridas")
+            diagnostico.get("suggested_tools") or diagnostico.get("herramientas_sugeridas")
         ),
-        requiere_grua=_extract_profile_bool(diagnostico.get("requiere_grua")),
-        observaciones=_extract_profile_str(diagnostico.get("observaciones")),
+        requiere_grua=_extract_profile_bool(
+            diagnostico.get("requires_tow") or diagnostico.get("requiere_grua")
+        ),
+        observaciones=_extract_profile_str(
+            diagnostico.get("observations") or diagnostico.get("observaciones")
+        ),
         prequotation_code=service.codigo_precotizacion,
         prequotation_min=service.monto_precotizado_min,
         prequotation_max=service.monto_precotizado_max,
@@ -390,6 +424,7 @@ def _build_incident_classification_response(
     incident: Incidente,
     previous_state: str,
 ) -> IncidentClassificationResponse:
+    triage_details = _build_triage_details(incident)
     return IncidentClassificationResponse(
         incident_id=incident.id_incidente,
         previous_state=previous_state,
@@ -399,7 +434,12 @@ def _build_incident_classification_response(
         severity=incident.severidad,
         confidence=incident.confianza_ia,
         requires_manual_review=incident.requiere_revision_manual,
-        summary=incident.diagnostico_ia_resumen,
+        summary=triage_details.summary,
+        specific_diagnosis=triage_details.specific_diagnosis,
+        suggested_service=triage_details.suggested_service,
+        customer_recommendation=triage_details.customer_recommendation,
+        operator_notes=triage_details.operator_notes,
+        visual_evidence_tags=triage_details.visual_evidence_tags,
     )
 
 
@@ -527,11 +567,6 @@ def _validate_matchmaking_eligible(incident: Incidente) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Incident diagnosis is incomplete for matchmaking.",
-        )
-    if incident.requiere_revision_manual:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Incident requires manual review before matchmaking.",
         )
 
 
@@ -1080,25 +1115,6 @@ def _map_detected_specialty(
     return specialty_map.get(normalized_name)
 
 
-def _build_diagnostico_payload(
-    *,
-    normalized_result: dict[str, Any],
-    provider_metadata: dict[str, Any],
-    detected_specialty: Especialidad | None,
-    min_confidence: int,
-) -> dict[str, Any]:
-    payload = {
-        **normalized_result,
-        "provider": provider_metadata.get("provider"),
-        "model": provider_metadata.get("model"),
-        "audio_included": provider_metadata.get("audio_included"),
-        "audio_omitted_reason": provider_metadata.get("audio_omitted_reason"),
-        "specialty_detected_mapped": detected_specialty.nombre if detected_specialty else None,
-        "triage_min_confidence": min_confidence,
-    }
-    return payload
-
-
 def _execute_incident_classification(
     *,
     incident: Incidente,
@@ -1127,31 +1143,46 @@ def _execute_incident_classification(
 
     detected_specialty = _map_detected_specialty(
         specialty_map=specialty_map,
-        raw_name=provider_result.especialidad_detectada_nombre,
+        raw_name=provider_result.detected_specialty,
     )
-    confidence_value = Decimal(provider_result.confianza)
-    manual_review_required = (
-        detected_specialty is None
-        or confidence_value < settings.triage_min_confidence
+    confidence_value = Decimal(provider_result.confidence)
+    triage_details = build_triage_details_from_ai_result(
+        description=incident.descripcion_cliente,
+        detected_specialty_name=(
+            detected_specialty.nombre if detected_specialty is not None else None
+        ),
+        raw_detected_specialty_name=provider_result.detected_specialty,
+        severity=provider_result.severity,
+        confidence=confidence_value,
+        summary=provider_result.summary,
+        specific_diagnosis=provider_result.specific_diagnosis,
+        suggested_service=provider_result.suggested_service,
+        customer_recommendation=provider_result.customer_recommendation,
+        operator_notes=provider_result.operator_notes,
+        visual_evidence_tags=provider_result.visual_evidence_tags,
+        provider_requires_manual_review=provider_result.requires_manual_review,
+        min_confidence=settings.triage_min_confidence,
+        image_count=len(images),
     )
+    manual_review_required = triage_details.requires_manual_review
 
-    incident.diagnostico_ia_resumen = provider_result.resumen
-    incident.diagnostico_ia_json = _build_diagnostico_payload(
-        normalized_result=provider_result.model_dump(mode="json"),
+    incident.diagnostico_ia_resumen = triage_details.summary
+    incident.diagnostico_ia_json = build_triage_payload(
+        raw_provider_result=provider_result.model_dump(mode="json"),
         provider_metadata=provider_metadata,
-        detected_specialty=detected_specialty,
+        details=triage_details,
         min_confidence=settings.triage_min_confidence,
     )
     incident.confianza_ia = confidence_value
-    incident.transcripcion_audio = provider_result.transcripcion_audio
-    incident.etiquetas_imagen = provider_result.etiquetas_imagen
-    incident.severidad = provider_result.severidad
+    incident.transcripcion_audio = provider_result.audio_transcript
+    incident.etiquetas_imagen = triage_details.visual_evidence_tags or None
+    incident.severidad = triage_details.severity
     incident.fecha_triaje = utc_now()
     incident.id_especialidad_detectada = (
         detected_specialty.id_especialidad if detected_specialty is not None else None
     )
     incident.requiere_revision_manual = manual_review_required
-    incident.estado = "DIAGNOSTICADO" if not manual_review_required else "EN_TRIAJE"
+    incident.estado = "DIAGNOSTICADO" if detected_specialty is not None else "EN_TRIAJE"
 
     db.add(
         _create_bitacora_event(
@@ -1196,7 +1227,8 @@ def _execute_incident_classification(
                 descripcion="El incidente requiere revision manual despues del triaje.",
                 datos_nuevos={
                     "confidence": str(confidence_value),
-                    "detected_specialty": provider_result.especialidad_detectada_nombre,
+                    "detected_specialty": provider_result.detected_specialty,
+                    "manual_review_reasons": triage_details.manual_review_reasons,
                     "audio_omitted_reason": provider_metadata.get("audio_omitted_reason"),
                 },
                 ip_origen=ip_origen,

@@ -11,6 +11,11 @@ class IncidentClassificationModel {
   final double? confidence;
   final bool requiresManualReview;
   final String? summary;
+  final String? specificDiagnosis;
+  final String? suggestedService;
+  final String? customerRecommendation;
+  final String? operatorNotes;
+  final List<String> visualEvidenceTags;
 
   const IncidentClassificationModel({
     required this.incidentId,
@@ -22,6 +27,11 @@ class IncidentClassificationModel {
     this.confidence,
     required this.requiresManualReview,
     this.summary,
+    this.specificDiagnosis,
+    this.suggestedService,
+    this.customerRecommendation,
+    this.operatorNotes,
+    this.visualEvidenceTags = const [],
   });
 
   factory IncidentClassificationModel.fromJson(Map<String, dynamic> json) {
@@ -43,6 +53,21 @@ class IncidentClassificationModel {
       confidence: parseNullableDouble(json['confidence']),
       requiresManualReview: json['requires_manual_review'] as bool? ?? false,
       summary: json['summary'] as String?,
+      specificDiagnosis: json['specific_diagnosis'] as String?,
+      suggestedService: json['suggested_service'] as String?,
+      customerRecommendation: json['customer_recommendation'] as String?,
+      operatorNotes: json['operator_notes'] as String?,
+      visualEvidenceTags: _parseVisualEvidenceTags(json['visual_evidence_tags']),
     );
   }
+}
+
+List<String> _parseVisualEvidenceTags(dynamic value) {
+  if (value is List) {
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+  return const [];
 }

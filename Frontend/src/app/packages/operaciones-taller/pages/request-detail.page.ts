@@ -25,6 +25,7 @@ import { PrequotationResultCardComponent } from '../components/prequotation-resu
 import {
   formatLocalDateTime,
   localizeBackendMessage,
+  localizeSpecialtyLabel,
   localizeStatusLabel,
 } from '../../../shared/utils/user-facing-text';
 import { WorkshopRequestsApi } from '../data-access/workshop-requests.api';
@@ -149,11 +150,11 @@ type DecisionConflictAction = 'catalog' | null;
                 <div class="summary-grid summary-grid--dense">
                   <div class="summary-item">
                     <span class="text-muted">Especialidad detectada</span>
-                    <strong>{{ data.detected_specialty?.nombre || 'Sin detectar' }}</strong>
+                    <strong>{{ localizeSpecialty(data.detected_specialty?.nombre) }}</strong>
                   </div>
                   <div class="summary-item">
                     <span class="text-muted">Especialidad reportada</span>
-                    <strong>{{ data.client_reported_specialty?.nombre || 'Sin reportar' }}</strong>
+                    <strong>{{ localizeSpecialty(data.client_reported_specialty?.nombre) }}</strong>
                   </div>
                   <div class="summary-item">
                     <span class="text-muted">Severidad</span>
@@ -169,6 +170,41 @@ type DecisionConflictAction = 'catalog' | null;
                   <span class="text-muted">Resumen IA</span>
                   <p>{{ data.ai_summary || 'Sin resumen IA disponible.' }}</p>
                 </div>
+
+                @if (data.specific_diagnosis) {
+                  <div class="copy-block">
+                    <span class="text-muted">Diagnostico especifico</span>
+                    <p>{{ data.specific_diagnosis }}</p>
+                  </div>
+                }
+
+                @if (data.suggested_service) {
+                  <div class="copy-block">
+                    <span class="text-muted">Servicio sugerido</span>
+                    <p>{{ data.suggested_service }}</p>
+                  </div>
+                }
+
+                @if (data.customer_recommendation) {
+                  <div class="copy-block">
+                    <span class="text-muted">Recomendacion para el cliente</span>
+                    <p>{{ data.customer_recommendation }}</p>
+                  </div>
+                }
+
+                @if (data.operator_notes) {
+                  <div class="copy-block">
+                    <span class="text-muted">Notas para el taller / operario</span>
+                    <p>{{ data.operator_notes }}</p>
+                  </div>
+                }
+
+                @if (visualEvidenceTagsText()) {
+                  <div class="copy-block">
+                    <span class="text-muted">Evidencias visuales</span>
+                    <p>{{ visualEvidenceTagsText() }}</p>
+                  </div>
+                }
 
                 @if (data.transcripcion_audio) {
                   <div class="copy-block">
@@ -437,6 +473,15 @@ export class RequestDetailPage {
     return JSON.stringify(labels);
   });
 
+  protected readonly visualEvidenceTagsText = computed(() => {
+    const tags = this.detail()?.visual_evidence_tags;
+    if (!tags?.length) {
+      return '';
+    }
+
+    return tags.join(', ');
+  });
+
   constructor() {
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const parsedId = this.parsePositiveId(params.get('requestId'));
@@ -603,6 +648,10 @@ export class RequestDetailPage {
 
   protected localizeStatus(value: string | null | undefined): string {
     return localizeStatusLabel(value);
+  }
+
+  protected localizeSpecialty(value: string | null | undefined): string {
+    return localizeSpecialtyLabel(value);
   }
 
   private submitDecision(

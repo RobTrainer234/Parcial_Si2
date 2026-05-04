@@ -205,3 +205,34 @@ export function localizeStatusLabel(raw: string | null | undefined): string {
 
   return value;
 }
+
+export function localizeSpecialtyLabel(raw: string | null | undefined): string {
+  const value = String(raw ?? '').trim();
+  if (!value) {
+    return 'Sin especialidad';
+  }
+
+  switch (value.toUpperCase()) {
+    case 'MECANICA_GENERAL':
+    case 'MECANICA GENERAL':
+      return 'Mecánica general';
+    case 'DIAGNOSTICO_GENERAL':
+    case 'DIAGNOSTICO GENERAL':
+      return 'Diagnóstico general';
+    case 'BATERIA':
+      return 'Batería';
+    case 'GRUA':
+      return 'Grúa';
+    case 'LLANTAS':
+      return 'Llantas';
+    case 'ELECTRICIDAD':
+      return 'Electricidad';
+    case 'AIRE ACONDICIONADO':
+      return 'Aire acondicionado';
+    case 'MECANICA':
+    case 'MECÁNICA':
+      return 'Mecánica';
+    default:
+      return localizeStatusLabel(value);
+  }
+}

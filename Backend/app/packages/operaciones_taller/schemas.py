@@ -59,6 +59,11 @@ class WorkshopRequestDetailResponse(BaseModel):
     detected_specialty: SpecialtySummaryResponse | None = None
     severity: str | None = None
     ai_summary: str | None = None
+    specific_diagnosis: str | None = None
+    suggested_service: str | None = None
+    customer_recommendation: str | None = None
+    operator_notes: str | None = None
+    visual_evidence_tags: list[str] = Field(default_factory=list)
     transcripcion_audio: str | None = None
     image_labels: list[str] | dict[str, object] | None = None
     service_id: int | None = None

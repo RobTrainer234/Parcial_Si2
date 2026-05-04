@@ -322,12 +322,14 @@ class _OperatorServiceDetailPageState
                       if (detail.clientReportedSpecialty != null)
                         _InfoRow(
                           label: 'Especialidad reportada',
-                          value: detail.clientReportedSpecialty!,
+                          value:
+                              localizeSpecialtyLabel(detail.clientReportedSpecialty),
                         ),
                       if (detail.detectedSpecialty != null)
                         _InfoRow(
                           label: 'Especialidad detectada',
-                          value: detail.detectedSpecialty!,
+                          value:
+                              localizeSpecialtyLabel(detail.detectedSpecialty),
                         ),
                       if (detail.severity != null)
                         _InfoRow(
@@ -344,6 +346,30 @@ class _OperatorServiceDetailPageState
                         _InfoRow(
                           label: 'Resumen IA',
                           value: detail.aiSummary!,
+                        ),
+                      if (detail.specificDiagnosis != null &&
+                          detail.specificDiagnosis!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Diagnóstico específico',
+                          value: detail.specificDiagnosis!,
+                        ),
+                      if (detail.suggestedService != null &&
+                          detail.suggestedService!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Servicio sugerido',
+                          value: detail.suggestedService!,
+                        ),
+                      if (detail.customerRecommendation != null &&
+                          detail.customerRecommendation!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Recomendacion para el cliente',
+                          value: detail.customerRecommendation!,
+                        ),
+                      if (detail.operatorNotes != null &&
+                          detail.operatorNotes!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Notas para el operario',
+                          value: detail.operatorNotes!,
                         ),
                       _InfoRow(
                         label: 'Ubicacion del cliente',
@@ -368,6 +394,11 @@ class _OperatorServiceDetailPageState
                           label: 'Etiquetas de imagen',
                           value: _formatImageLabels(detail.imageLabels)!,
                         ),
+                      if (detail.visualEvidenceTags.isNotEmpty)
+                        _InfoRow(
+                          label: 'Evidencias visuales',
+                          value: detail.visualEvidenceTags.join(', '),
+                        ),
                       if (detail.suggestedTools.isNotEmpty)
                         _InfoRow(
                           label: 'Herramientas sugeridas',
@@ -389,7 +420,7 @@ class _OperatorServiceDetailPageState
                         const Padding(
                           padding: EdgeInsets.only(top: 8),
                           child: Text(
-                            'El diagnostico inicial marco este caso para revision manual.',
+                            'La IA no tiene certeza completa. El taller realizará diagnóstico físico.',
                           ),
                         ),
                     ],

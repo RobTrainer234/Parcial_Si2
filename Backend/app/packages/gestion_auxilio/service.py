@@ -26,6 +26,9 @@ from app.models import (
     Usuario,
 )
 from app.packages.inteligencia_triaje.matchmaking import build_ranked_candidate
+from app.packages.inteligencia_triaje.diagnosis_utils import (
+    build_triage_details_from_payload,
+)
 from app.packages.inteligencia_triaje.service import (
     _build_ranked_candidates,
     _get_attempted_workshop_ids,
@@ -261,7 +264,6 @@ def _validate_recommendations_diagnosis_ready(incident: Incidente) -> None:
         or incident.id_especialidad_detectada is None
         or incident.severidad is None
         or (incident.diagnostico_ia_resumen is None and incident.diagnostico_ia_json is None)
-        or incident.requiere_revision_manual
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1059,6 +1061,18 @@ def _estimate_workshop_arrival_text(distance_km: Decimal) -> str | None:
 
 
 def _build_diagnosis_summary(incident: Incidente) -> IncidentDiagnosisSummaryResponse:
+    triage_details = build_triage_details_from_payload(
+        payload=incident.diagnostico_ia_json,
+        detected_specialty_name=(
+            incident.especialidad_detectada.nombre
+            if incident.especialidad_detectada is not None
+            else None
+        ),
+        summary=incident.diagnostico_ia_resumen,
+        severity=incident.severidad,
+        confidence=incident.confianza_ia,
+        requires_manual_review=incident.requiere_revision_manual,
+    )
     return IncidentDiagnosisSummaryResponse(
         incident_id=incident.id_incidente,
         incident_state=incident.estado,
@@ -1076,7 +1090,12 @@ def _build_diagnosis_summary(incident: Incidente) -> IncidentDiagnosisSummaryRes
         ),
         severity=incident.severidad,
         confidence=incident.confianza_ia,
-        ai_summary=incident.diagnostico_ia_resumen,
+        ai_summary=triage_details.summary,
+        specific_diagnosis=triage_details.specific_diagnosis,
+        suggested_service=triage_details.suggested_service,
+        customer_recommendation=triage_details.customer_recommendation,
+        operator_notes=triage_details.operator_notes,
+        visual_evidence_tags=triage_details.visual_evidence_tags,
         transcripcion_audio=incident.transcripcion_audio,
         etiquetas_imagen=incident.etiquetas_imagen,
         requires_manual_review=incident.requiere_revision_manual,

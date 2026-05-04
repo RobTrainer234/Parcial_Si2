@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
 import '../../../../core/widgets/app_page_scaffold.dart';
 import '../../../../core/widgets/app_primary_button.dart';
@@ -272,13 +273,22 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
     if (normalized.contains('DIAGNOSTICO_GENERAL') ||
         normalized.contains('DIAGNÓSTICO_GENERAL') ||
         normalized == 'GENERAL') {
+      return 'No estoy seguro / Diagnóstico general';
+    }
+    if (normalized.contains('MECANICA_GENERAL') ||
+        normalized.contains('MECÁNICA_GENERAL')) {
+      return localizeSpecialtyLabel('MECANICA_GENERAL');
+    }
+    if (normalized.contains('DIAGNOSTICO_GENERAL') ||
+        normalized.contains('DIAGNÓSTICO_GENERAL') ||
+        normalized == 'GENERAL') {
       return 'No estoy seguro / diagnóstico general';
     }
     if (normalized.contains('MECANICA_GENERAL') ||
         normalized.contains('MECÁNICA_GENERAL')) {
       return 'Mecánica general';
     }
-    return specialty.nombre;
+    return localizeSpecialtyLabel(specialty.nombre);
   }
 
   Future<void> _submit() async {

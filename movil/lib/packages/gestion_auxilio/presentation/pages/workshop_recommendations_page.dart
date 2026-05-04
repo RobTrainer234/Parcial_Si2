@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
 import '../../../../core/widgets/app_empty_view.dart';
 import '../../../../core/widgets/app_error_view.dart';
@@ -156,12 +157,12 @@ class _RecommendationsContent extends StatelessWidget {
               if (data.diagnosis.detectedSpecialty != null)
                 _InfoRow(
                   label: 'Especialidad detectada',
-                  value: data.diagnosis.detectedSpecialty!,
+                  value: localizeSpecialtyLabel(data.diagnosis.detectedSpecialty),
                 ),
               if (data.diagnosis.severity != null)
                 _InfoRow(
                   label: 'Severidad',
-                  value: data.diagnosis.severity!,
+                  value: localizeStatusLabel(data.diagnosis.severity),
                 ),
               if (data.diagnosis.confidence != null)
                 _InfoRow(
@@ -174,6 +175,28 @@ class _RecommendationsContent extends StatelessWidget {
                 Text(
                   data.diagnosis.aiSummary!,
                   style: theme.textTheme.bodyMedium,
+                ),
+              ],
+              if (data.diagnosis.requiresManualReview) ...[
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 22,
+                      color: Colors.orange.shade700,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'La IA no tiene certeza completa. El taller realizará diagnóstico físico.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.orange.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],

@@ -218,3 +218,34 @@ String _humanizeCode(String value) {
   final sentence = words.join(' ');
   return sentence[0].toUpperCase() + sentence.substring(1);
 }
+
+String localizeSpecialtyLabel(String? raw) {
+  final value = raw?.trim() ?? '';
+  if (value.isEmpty) {
+    return '-';
+  }
+
+  switch (value.toUpperCase()) {
+    case 'MECANICA_GENERAL':
+    case 'MECANICA GENERAL':
+      return 'Mecánica general';
+    case 'DIAGNOSTICO_GENERAL':
+    case 'DIAGNOSTICO GENERAL':
+      return 'Diagnóstico general';
+    case 'BATERIA':
+      return 'Batería';
+    case 'GRUA':
+      return 'Grúa';
+    case 'LLANTAS':
+      return 'Llantas';
+    case 'ELECTRICIDAD':
+      return 'Electricidad';
+    case 'AIRE ACONDICIONADO':
+      return 'Aire acondicionado';
+    case 'MECANICA':
+    case 'MECÁNICA':
+      return 'Mecánica';
+    default:
+      return _humanizeCode(value);
+  }
+}
