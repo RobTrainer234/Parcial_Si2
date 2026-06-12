@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -19,14 +19,23 @@ from .dependencies import (
     require_workshop_admin_context,
     require_workshop_read_context,
 )
+from .reports import (
+    generate_dynamic_audio_report,
+    generate_dynamic_text_report,
+    get_static_report,
+    list_static_reports,
+)
 from .schemas import (
     AssignOperarioRequest,
     AssignOperarioResponse,
+    DynamicReportRequest,
+    DynamicReportResponse,
     FinalEvidenceResponse,
     OperarioCandidateSummary,
     RepairReportItemInput,
     RepairReportSaveResponse,
     RepairReportSnapshotResponse,
+    StaticReportSummaryResponse,
     UsedSparePartResponse,
     WaitingAssignmentServiceSummary,
     WorkshopActiveServiceTrackingSummary,
@@ -34,6 +43,7 @@ from .schemas import (
     WorkshopCatalogServiceResponse,
     WorkshopCatalogServiceUpdateRequest,
     WorkshopDashboardOverviewResponse,
+    WorkshopReportResponse,
     VoiceDashboardReportResponse,
     WorkshopRequestDecisionRequest,
     WorkshopRequestDecisionResponse,
@@ -77,9 +87,29 @@ from .service import (
     update_workshop_profile,
     update_workshop_operario_availability,
 )
+from .realtime import serve_service_socket, serve_workshop_tracking_socket
 
 
 router = APIRouter(prefix="/workshop", tags=["workshop-requests"])
+realtime_router = APIRouter(tags=["workshop-realtime"])
+
+
+@realtime_router.websocket("/ws/services/{service_id}")
+async def workshop_service_realtime_socket(
+    websocket: WebSocket,
+    service_id: int,
+    token: str,
+) -> None:
+    await serve_service_socket(websocket, service_id, token)
+
+
+@realtime_router.websocket("/ws/workshops/{workshop_id}/tracking")
+async def workshop_tracking_realtime_socket(
+    websocket: WebSocket,
+    workshop_id: int,
+    token: str,
+) -> None:
+    await serve_workshop_tracking_socket(websocket, workshop_id, token)
 
 
 @router.get("/dashboard/overview", response_model=WorkshopDashboardOverviewResponse)
@@ -110,6 +140,68 @@ def workshop_dashboard_voice_report(
         admin_context=admin_context,
         db=db,
         audio_file=audio,
+        date_from=date_from,
+        date_to=date_to,
+        scope=scope,
+    )
+
+
+@router.get("/reports/static", response_model=list[StaticReportSummaryResponse])
+def workshop_static_reports(
+    _: WorkshopAccessContext = Depends(require_workshop_access),
+) -> list[StaticReportSummaryResponse]:
+    return list_static_reports()
+
+
+@router.get("/reports/static/{report_type}", response_model=WorkshopReportResponse)
+def workshop_static_report_detail(
+    report_type: str,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    status: str | None = None,
+    severity: str | None = None,
+    specialty_id: int | None = None,
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
+    db: Session = Depends(get_db),
+) -> WorkshopReportResponse:
+    return get_static_report(
+        report_type=report_type,
+        admin_context=admin_context,
+        db=db,
+        date_from=date_from,
+        date_to=date_to,
+        status=status,
+        severity=severity,
+        specialty_id=specialty_id,
+    )
+
+
+@router.post("/reports/dynamic/text", response_model=DynamicReportResponse)
+def workshop_dynamic_report_text(
+    payload: DynamicReportRequest,
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
+    db: Session = Depends(get_db),
+) -> DynamicReportResponse:
+    return generate_dynamic_text_report(
+        payload=payload,
+        admin_context=admin_context,
+        db=db,
+    )
+
+
+@router.post("/reports/dynamic/audio", response_model=DynamicReportResponse)
+def workshop_dynamic_report_audio(
+    audio_file: UploadFile = File(...),
+    date_from: datetime | None = Form(default=None),
+    date_to: datetime | None = Form(default=None),
+    scope: str | None = Form(default="TALLER"),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
+    db: Session = Depends(get_db),
+) -> DynamicReportResponse:
+    return generate_dynamic_audio_report(
+        admin_context=admin_context,
+        db=db,
+        audio_file=audio_file,
         date_from=date_from,
         date_to=date_to,
         scope=scope,

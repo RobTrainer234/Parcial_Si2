@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/auth/auth_controller.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/service_realtime_socket.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
@@ -30,6 +32,12 @@ class ServiceTrackingPage extends ConsumerStatefulWidget {
 
 class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
   Timer? _refreshTimer;
+  ServiceRealtimeSocketSession? _realtimeSession;
+  StreamSubscription<ServiceRealtimeEvent>? _realtimeEventSubscription;
+  StreamSubscription<ServiceRealtimeConnectionState>? _realtimeStateSubscription;
+  ServiceRealtimeConnectionState _realtimeState =
+      ServiceRealtimeConnectionState.disconnected;
+  DateTime? _lastRealtimeEventAt;
 
   @override
   void initState() {
@@ -42,12 +50,60 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
           .read(serviceTrackingProvider(widget.serviceId).notifier)
           .refreshSilently();
     });
+    _connectRealtime();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _realtimeEventSubscription?.cancel();
+    _realtimeStateSubscription?.cancel();
+    _realtimeSession?.dispose();
     super.dispose();
+  }
+
+  void _connectRealtime() {
+    final token = ref.read(authControllerProvider).valueOrNull?.accessToken;
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    final realtimeService = ref.read(serviceRealtimeSocketServiceProvider);
+    final session = realtimeService.connectToService(
+      serviceId: widget.serviceId,
+      token: token,
+    );
+    _realtimeSession = session;
+    _realtimeEventSubscription = session.events.listen((event) {
+      ref
+          .read(serviceTrackingProvider(widget.serviceId).notifier)
+          .applyRealtimeEvent(event);
+      if (mounted) {
+        setState(() {
+          _lastRealtimeEventAt = DateTime.now();
+        });
+      }
+    });
+    _realtimeStateSubscription = session.states.listen((nextState) {
+      if (mounted) {
+        setState(() {
+          _realtimeState = nextState;
+        });
+      }
+    });
+  }
+
+  String _realtimeStatusLabel() {
+    switch (_realtimeState) {
+      case ServiceRealtimeConnectionState.connected:
+        return 'En vivo';
+      case ServiceRealtimeConnectionState.reconnecting:
+        return 'Reconectando';
+      case ServiceRealtimeConnectionState.disconnected:
+        if (_lastRealtimeEventAt == null) {
+          return 'Sin conexion en tiempo real';
+        }
+        return 'Actualizado ${_realtimeElapsedLabel(_lastRealtimeEventAt)}';
+    }
   }
 
   @override
@@ -90,6 +146,10 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
                 .refresh(),
             child: ListView(
               children: [
+                AppCard(
+                  child: Text(_realtimeStatusLabel()),
+                ),
+                const SizedBox(height: 16),
                 AppCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -151,6 +211,7 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
                   operarioLongitud: status.lastOperarioLongitud,
                   historyPoints: validHistory,
                   lastLocationAt: status.lastLocationAt,
+                  routePoints: status.routePoints,
                 ),
                 const SizedBox(height: 16),
                 AppCard(
@@ -388,6 +449,20 @@ String _friendlyServiceState(String state) {
     default:
       return localizeStatusLabel(state);
   }
+}
+
+String _realtimeElapsedLabel(DateTime? value) {
+  if (value == null) {
+    return 'sin actualizaciones recientes';
+  }
+  final difference = DateTime.now().difference(value);
+  if (difference.inSeconds < 60) {
+    return 'hace ${difference.inSeconds}s';
+  }
+  if (difference.inMinutes < 60) {
+    return 'hace ${difference.inMinutes} min';
+  }
+  return 'hace ${difference.inHours} h';
 }
 
 String _formatDate(DateTime? value) {

@@ -18,6 +18,9 @@ export interface ServiceTrackingStatus {
   current_distance_meters?: number | null;
   eta_seconds?: number | null;
   eta_text?: string | null;
+  route_distance_meters?: number | null;
+  route_duration_seconds?: number | null;
+  route_points?: number[][] | null;
   tracking_message: string;
 }
 

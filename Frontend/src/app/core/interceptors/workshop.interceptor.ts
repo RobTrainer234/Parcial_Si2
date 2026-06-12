@@ -6,6 +6,7 @@ import { WorkshopSelectionService } from '../auth/workshop-selection.service';
 
 const WORKSHOP_API_PATHS = [
   '/workshop/dashboard',
+  '/workshop/reports',
   '/workshop/profile',
   '/workshop/catalog',
   '/workshop/staff',
@@ -37,12 +38,12 @@ export const workshopInterceptor: HttpInterceptorFn = (request, next) => {
     return next(request);
   }
 
-  const params = url.searchParams;
-  if (!params.has('workshop_id')) {
-    params.set('workshop_id', String(workshopId));
+  if (request.params.has('workshop_id') || url.searchParams.has('workshop_id')) {
+    return next(request);
   }
 
-  const newUrl = url.pathname + url.search;
-  const cloned = request.clone({ url: newUrl });
+  const cloned = request.clone({
+    params: request.params.set('workshop_id', String(workshopId)),
+  });
   return next(cloned);
 };

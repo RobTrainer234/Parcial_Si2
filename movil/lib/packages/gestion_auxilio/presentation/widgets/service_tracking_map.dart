@@ -13,6 +13,7 @@ class ServiceTrackingMap extends StatelessWidget {
     required this.operarioLongitud,
     required this.historyPoints,
     required this.lastLocationAt,
+    this.routePoints,
   });
 
   final double? incidentLatitud;
@@ -21,6 +22,7 @@ class ServiceTrackingMap extends StatelessWidget {
   final double? operarioLongitud;
   final List<TrackingHistoryPointModel> historyPoints;
   final DateTime? lastLocationAt;
+  final List<LatLng>? routePoints;
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +33,9 @@ class ServiceTrackingMap extends StatelessWidget {
         .whereType<LatLng>()
         .toList();
 
+    final routeLatLng = routePoints ?? const <LatLng>[];
     final allPoints = <LatLng>[
+      ...routeLatLng,
       ...historyLatLng,
       if (incidentPoint != null) incidentPoint,
       if (operarioPoint != null) operarioPoint,
@@ -111,7 +115,17 @@ class ServiceTrackingMap extends StatelessWidget {
                               'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'si2.auxilio_vial',
                         ),
-                        if (historyLatLng.length >= 2)
+                        if (routeLatLng.length >= 2)
+                          PolylineLayer(
+                            polylines: [
+                              Polyline(
+                                points: routeLatLng,
+                                strokeWidth: 4,
+                                color: Colors.indigo.shade500,
+                              ),
+                            ],
+                          )
+                        else if (historyLatLng.length >= 2)
                           PolylineLayer(
                             polylines: [
                               Polyline(

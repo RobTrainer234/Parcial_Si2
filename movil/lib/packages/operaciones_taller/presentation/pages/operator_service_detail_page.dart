@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/auth/auth_controller.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/service_realtime_socket.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
@@ -32,6 +36,70 @@ class _OperatorServiceDetailPageState
   bool _isSendingLocation = false;
   bool _isAcknowledgingProfile = false;
   bool _isOpeningMaps = false;
+  ServiceRealtimeSocketSession? _realtimeSession;
+  StreamSubscription<ServiceRealtimeEvent>? _realtimeEventSubscription;
+  StreamSubscription<ServiceRealtimeConnectionState>? _realtimeStateSubscription;
+  ServiceRealtimeConnectionState _realtimeState =
+      ServiceRealtimeConnectionState.disconnected;
+  DateTime? _lastRealtimeEventAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectRealtime();
+  }
+
+  @override
+  void dispose() {
+    _realtimeEventSubscription?.cancel();
+    _realtimeStateSubscription?.cancel();
+    _realtimeSession?.dispose();
+    super.dispose();
+  }
+
+  void _connectRealtime() {
+    final token = ref.read(authControllerProvider).valueOrNull?.accessToken;
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    final realtimeService = ref.read(serviceRealtimeSocketServiceProvider);
+    final session = realtimeService.connectToService(
+      serviceId: widget.serviceId,
+      token: token,
+    );
+    _realtimeSession = session;
+    _realtimeEventSubscription = session.events.listen((_) async {
+      await ref
+          .read(operatorServiceDetailProvider(widget.serviceId).notifier)
+          .refresh();
+      if (mounted) {
+        setState(() {
+          _lastRealtimeEventAt = DateTime.now();
+        });
+      }
+    });
+    _realtimeStateSubscription = session.states.listen((nextState) {
+      if (mounted) {
+        setState(() {
+          _realtimeState = nextState;
+        });
+      }
+    });
+  }
+
+  String _realtimeStatusLabel() {
+    switch (_realtimeState) {
+      case ServiceRealtimeConnectionState.connected:
+        return 'En vivo';
+      case ServiceRealtimeConnectionState.reconnecting:
+        return 'Reconectando';
+      case ServiceRealtimeConnectionState.disconnected:
+        if (_lastRealtimeEventAt == null) {
+          return 'Sin conexion en tiempo real';
+        }
+        return 'Actualizado ${_elapsedRealtimeLabel(_lastRealtimeEventAt!)}';
+    }
+  }
 
   Future<void> _runMainAction(OperatorServiceDetailViewModel viewModel) async {
     final currentState = viewModel.detail.serviceState;
@@ -297,6 +365,8 @@ class _OperatorServiceDetailPageState
                 .refresh(),
             child: ListView(
               children: [
+                AppCard(child: Text(_realtimeStatusLabel())),
+                const SizedBox(height: 16),
                 AppCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -955,6 +1025,17 @@ String _formatClientLocation(double? latitud, double? longitud) {
     return 'Ubicacion del cliente no disponible';
   }
   return '${latitud.toStringAsFixed(5)}, ${longitud.toStringAsFixed(5)}';
+}
+
+String _elapsedRealtimeLabel(DateTime value) {
+  final difference = DateTime.now().difference(value);
+  if (difference.inSeconds < 60) {
+    return 'hace ${difference.inSeconds}s';
+  }
+  if (difference.inMinutes < 60) {
+    return 'hace ${difference.inMinutes} min';
+  }
+  return 'hace ${difference.inHours} h';
 }
 
 class _FriendlyLocationException implements Exception {

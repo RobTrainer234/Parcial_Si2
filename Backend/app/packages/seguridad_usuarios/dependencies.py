@@ -248,18 +248,15 @@ def serialize_user_profile(user: Usuario) -> dict[str, object]:
     }
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-) -> Usuario:
-    if credentials is None:
+def get_user_from_access_token(token: str, db: Session) -> Usuario:
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing bearer token.",
         )
 
     try:
-        payload = decode_token(credentials.credentials, expected_type="access")
+        payload = decode_token(token, expected_type="access")
         user_id = int(payload["sub"])
     except (InvalidTokenError, KeyError, ValueError):
         raise HTTPException(
@@ -275,6 +272,18 @@ def get_current_user(
         )
 
     return ensure_user_login_allowed(user)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> Usuario:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token.",
+        )
+    return get_user_from_access_token(credentials.credentials, db)
 
 
 def get_current_profile_user(current_user: Usuario = Depends(get_current_user)) -> Usuario:

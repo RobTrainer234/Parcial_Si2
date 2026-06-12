@@ -36,6 +36,7 @@ from app.packages.inteligencia_triaje.service import (
 )
 from app.packages.inteligencia_triaje.matchmaking import haversine_distance_km
 from app.packages.seguridad_usuarios.security import utc_now
+from app.packages.operaciones_taller.realtime import publish_service_realtime_event
 
 from .maps_provider import RouteProviderError, get_route
 from .notification_types import (
@@ -1632,6 +1633,11 @@ def start_navigation(
     if message == "Navigation started successfully.":
         client_user = _get_client_user(db, cliente_id=incident.id_cliente)
         _auto_dispatch_notifications(target_user=client_user, db=db)
+    publish_service_realtime_event(
+        db=db,
+        service_id=service.id_servicio,
+        event_type="ROUTE_UPDATED",
+    )
 
     return NavigationStartResponse(
         service_id=service.id_servicio,
@@ -1744,6 +1750,11 @@ def update_service_location(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Service location update could not be persisted.",
         ) from exc
+    publish_service_realtime_event(
+        db=db,
+        service_id=service.id_servicio,
+        event_type="SERVICE_STATUS_UPDATED" if has_arrived else "OPERATOR_LOCATION_UPDATED",
+    )
 
     return ServiceLocationUpdateResponse(
         service_id=service.id_servicio,
@@ -2816,6 +2827,11 @@ def update_service_progress(
         ) from exc
 
     _auto_dispatch_notifications(target_user=client_user, db=db)
+    publish_service_realtime_event(
+        db=db,
+        service_id=service.id_servicio,
+        event_type="SERVICE_STATUS_UPDATED",
+    )
 
     return ServiceProgressUpdateResponse(
         service_id=service.id_servicio,
@@ -3024,6 +3040,11 @@ def decide_service_finalization(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Finalization confirmation could not be persisted.",
             ) from exc
+        publish_service_realtime_event(
+            db=db,
+            service_id=service.id_servicio,
+            event_type="SERVICE_COMPLETED",
+        )
 
         return FinalizationDecisionResponse(
             service_id=service.id_servicio,
@@ -3101,6 +3122,11 @@ def decide_service_finalization(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Finalization rejection could not be persisted.",
         ) from exc
+    publish_service_realtime_event(
+        db=db,
+        service_id=service.id_servicio,
+        event_type="SERVICE_STATUS_UPDATED",
+    )
 
     return FinalizationDecisionResponse(
         service_id=service.id_servicio,
