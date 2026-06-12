@@ -8,6 +8,22 @@ export interface SpecialtySummaryResponse {
   nombre: string;
 }
 
+export interface WorkshopIncidentEvidenceResponse {
+  id_evidencia: number;
+  tipo_evidencia: string;
+  categoria: string;
+  url_archivo: string;
+  mime_type?: string | null;
+  tamano_bytes?: number | null;
+  fecha_registro: string;
+}
+
+export interface WorkshopIncidentEvidenceSummaryResponse {
+  total: number;
+  imagenes: number;
+  audio: number;
+}
+
 export interface WorkshopRequestSummary {
   request_id: number;
   incident_id: number;
@@ -17,6 +33,8 @@ export interface WorkshopRequestSummary {
   distance_km: string | number;
   detected_specialty?: SpecialtySummaryResponse | null;
   severity?: string | null;
+  confidence?: string | number | null;
+  requires_manual_review?: boolean;
   ai_summary?: string | null;
   used_insurance_priority: boolean;
   attempt_number: number;
@@ -44,14 +62,20 @@ export interface WorkshopRequestDetailResponse {
   client_reported_specialty?: SpecialtySummaryResponse | null;
   detected_specialty?: SpecialtySummaryResponse | null;
   severity?: string | null;
+  confidence?: string | number | null;
+  requires_manual_review?: boolean;
   ai_summary?: string | null;
   specific_diagnosis?: string | null;
   suggested_service?: string | null;
   customer_recommendation?: string | null;
   operator_notes?: string | null;
   visual_evidence_tags?: string[] | null;
+  audio_summary?: string | null;
+  audio_analysis_type?: string | null;
   transcripcion_audio?: string | null;
   image_labels?: string[] | Record<string, unknown> | null;
+  evidence_summary: WorkshopIncidentEvidenceSummaryResponse;
+  evidences?: WorkshopIncidentEvidenceResponse[];
   service_id?: number | null;
   service_state?: string | null;
   prequotation_code?: string | null;

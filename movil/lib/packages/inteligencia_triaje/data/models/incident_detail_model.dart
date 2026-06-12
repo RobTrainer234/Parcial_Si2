@@ -21,6 +21,8 @@ class IncidentDetailModel {
   final Map<String, dynamic>? aiJson;
   final double? confidence;
   final String? audioTranscript;
+  final String? audioSummary;
+  final String audioAnalysisType;
   final dynamic imageTags;
   final DateTime? triageAt;
   final bool requiresManualReview;
@@ -48,6 +50,8 @@ class IncidentDetailModel {
     this.aiJson,
     this.confidence,
     this.audioTranscript,
+    this.audioSummary,
+    this.audioAnalysisType = 'NO_AUDIO',
     this.imageTags,
     this.triageAt,
     required this.requiresManualReview,
@@ -56,8 +60,13 @@ class IncidentDetailModel {
     this.audioCount = 0,
   });
 
-  bool get isDiagnosed =>
-      triageAt != null || aiSummary != null || detectedSpecialty != null;
+  bool get hasPersistedDiagnosis =>
+      triageAt != null && detectedSpecialty != null && aiJson != null;
+
+  bool get needsClassification =>
+      status == 'EN_TRIAJE' || !hasPersistedDiagnosis;
+
+  bool get isDiagnosed => hasPersistedDiagnosis;
 
   int get imageCountReceivedByBackend =>
       parseIntOrZero(aiJson?['image_count_received_by_backend']);
@@ -77,10 +86,22 @@ class IncidentDetailModel {
   bool get imageEvidenceNotSentToAi =>
       imageCountReceivedByBackend > 0 && imageCountSentToAi == 0;
 
+  bool get hasExperimentalAudioAnalysis =>
+      audioAnalysisType == 'MECHANICAL_SOUND_EXPERIMENTAL';
+
   factory IncidentDetailModel.fromJson(Map<String, dynamic> json) {
     final evidenceSummary = json['evidence_summary'] as Map<String, dynamic>?;
     final aiJsonRaw = json['diagnostico_ia_json'];
     final aiJson = aiJsonRaw is Map<String, dynamic> ? aiJsonRaw : null;
+    final detectedSpecialty =
+        json['especialidad_detectada'] is Map<String, dynamic>
+        ? SpecialtySummaryModel.fromJson(
+            json['especialidad_detectada'] as Map<String, dynamic>,
+          )
+        : null;
+    final triageAt = parseDate(json['fecha_triaje']);
+    final hasPersistedDiagnosis =
+        triageAt != null && detectedSpecialty != null && aiJson != null;
 
     return IncidentDetailModel(
       incidentId: parseRequiredInt(json['incident_id'], field: 'incident_id'),
@@ -94,38 +115,51 @@ class IncidentDetailModel {
         (json['especialidad_reportada'] as Map<String, dynamic>?) ??
             <String, dynamic>{},
       ),
-      detectedSpecialty: json['especialidad_detectada'] is Map<String, dynamic>
-          ? SpecialtySummaryModel.fromJson(
-              json['especialidad_detectada'] as Map<String, dynamic>,
-            )
+      detectedSpecialty: detectedSpecialty,
+      severity: hasPersistedDiagnosis ? json['severity'] as String? : null,
+      aiSummary: hasPersistedDiagnosis
+          ? (json['summary'] as String?) ??
+                (json['diagnostico_ia_resumen'] as String?) ??
+                (aiJson['summary'] as String?) ??
+                (aiJson['resumen'] as String?)
           : null,
-      severity: json['severity'] as String?,
-      aiSummary:
-          (json['summary'] as String?) ??
-          (json['diagnostico_ia_resumen'] as String?) ??
-          (aiJson?['summary'] as String?) ??
-          (aiJson?['resumen'] as String?),
-      specificDiagnosis:
-          (json['specific_diagnosis'] as String?) ??
-          (aiJson?['specific_diagnosis'] as String?),
-      suggestedService:
-          (json['suggested_service'] as String?) ??
-          (aiJson?['suggested_service'] as String?),
-      customerRecommendation:
-          (json['customer_recommendation'] as String?) ??
-          (aiJson?['customer_recommendation'] as String?),
-      operatorNotes:
-          (json['operator_notes'] as String?) ??
-          (aiJson?['operator_notes'] as String?),
-      visualEvidenceTags: _parseVisualEvidenceTags(
-        json['visual_evidence_tags'] ?? aiJson?['visual_evidence_tags'],
-      ),
+      specificDiagnosis: hasPersistedDiagnosis
+          ? (json['specific_diagnosis'] as String?) ??
+                (aiJson['specific_diagnosis'] as String?)
+          : null,
+      suggestedService: hasPersistedDiagnosis
+          ? (json['suggested_service'] as String?) ??
+                (aiJson['suggested_service'] as String?)
+          : null,
+      customerRecommendation: hasPersistedDiagnosis
+          ? (json['customer_recommendation'] as String?) ??
+                (aiJson['customer_recommendation'] as String?)
+          : null,
+      operatorNotes: hasPersistedDiagnosis
+          ? (json['operator_notes'] as String?) ??
+                (aiJson['operator_notes'] as String?)
+          : null,
+      visualEvidenceTags: hasPersistedDiagnosis
+          ? _parseVisualEvidenceTags(
+              json['visual_evidence_tags'] ?? aiJson['visual_evidence_tags'],
+            )
+          : const [],
       aiJson: aiJson,
-      confidence: parseNullableDouble(json['confianza_ia']),
+      confidence: hasPersistedDiagnosis
+          ? parseNullableDouble(json['confianza_ia'])
+          : null,
       audioTranscript: json['transcripcion_audio'] as String?,
+      audioSummary: (json['audio_summary'] as String?) ??
+          (aiJson?['audio_summary'] as String?) ??
+          (aiJson?['resumen_audio'] as String?),
+      audioAnalysisType: (json['audio_analysis_type'] as String?) ??
+          (aiJson?['audio_analysis_type'] as String?) ??
+          'NO_AUDIO',
       imageTags: json['etiquetas_imagen'],
-      triageAt: parseDate(json['fecha_triaje']),
-      requiresManualReview: json['requiere_revision_manual'] as bool? ?? false,
+      triageAt: triageAt,
+      requiresManualReview: hasPersistedDiagnosis
+          ? json['requiere_revision_manual'] as bool? ?? false
+          : false,
       evidenceTotal: parseIntOrZero(evidenceSummary?['total']),
       imageCount: parseIntOrZero(evidenceSummary?['imagenes']),
       audioCount: parseIntOrZero(evidenceSummary?['audio']),

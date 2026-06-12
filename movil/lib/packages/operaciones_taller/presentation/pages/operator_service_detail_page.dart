@@ -371,6 +371,18 @@ class _OperatorServiceDetailPageState
                           label: 'Notas para el operario',
                           value: detail.operatorNotes!,
                         ),
+                      if (detail.audioTranscript != null &&
+                          detail.audioTranscript!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Transcripción de audio',
+                          value: detail.audioTranscript!,
+                        ),
+                      if (detail.audioSummary != null &&
+                          detail.audioSummary!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Resumen de audio',
+                          value: detail.audioSummary!,
+                        ),
                       _InfoRow(
                         label: 'Ubicacion del cliente',
                         value: _formatClientLocation(
@@ -416,13 +428,62 @@ class _OperatorServiceDetailPageState
                         value:
                             '${detail.evidenceSummary.images} imagen(es), ${detail.evidenceSummary.audio} audio(s)',
                       ),
+                      if (detail.audioAnalysisType ==
+                          'MECHANICAL_SOUND_EXPERIMENTAL')
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Text(
+                            'El audio del cliente no contiene voz clara. El análisis por sonido mecánico es experimental.',
+                          ),
+                        ),
                       if (detail.requiresManualReview)
                         const Padding(
                           padding: EdgeInsets.only(top: 8),
                           child: Text(
-                            'La IA no tiene certeza completa. El taller realizará diagnóstico físico.',
+                            'La IA no tuvo suficiente confianza. Registra diagnóstico manual antes de continuar.',
                           ),
                         ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Evidencia del cliente',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      if (detail.aiSummary != null &&
+                          detail.aiSummary!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Resumen IA',
+                          value: detail.aiSummary!,
+                        ),
+                      _InfoRow(
+                        label: 'Transcripción de audio',
+                        value: detail.audioTranscript?.trim().isNotEmpty == true
+                            ? detail.audioTranscript!
+                            : 'No se adjuntó audio.',
+                      ),
+                      if (detail.audioSummary != null &&
+                          detail.audioSummary!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Resumen de audio',
+                          value: detail.audioSummary!,
+                        ),
+                      _InfoRow(
+                        label: 'Confianza IA',
+                        value: detail.confidence != null
+                            ? '${detail.confidence!.toStringAsFixed(0)}%'
+                            : 'Sin dato',
+                      ),
+                      _InfoRow(
+                        label: 'Revisión manual',
+                        value: detail.requiresManualReview ? 'Requerida' : 'No',
+                      ),
                     ],
                   ),
                 ),

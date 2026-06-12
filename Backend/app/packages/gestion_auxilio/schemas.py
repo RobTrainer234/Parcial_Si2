@@ -287,6 +287,8 @@ class IncidentDiagnosisSummaryResponse(BaseModel):
     customer_recommendation: str | None = None
     operator_notes: str | None = None
     visual_evidence_tags: list[str] = Field(default_factory=list)
+    audio_summary: str | None = None
+    audio_analysis_type: str = "NO_AUDIO"
     transcripcion_audio: str | None = None
     etiquetas_imagen: dict[str, object] | list[object] | None = None
     requires_manual_review: bool

@@ -15,15 +15,13 @@ class IncidentReportCreateData(_NormalizedModel):
     id_vehiculo: int
     latitud: Decimal = Field(ge=Decimal("-90"), le=Decimal("90"))
     longitud: Decimal = Field(ge=Decimal("-180"), le=Decimal("180"))
-    descripcion_cliente: str = Field(min_length=1, max_length=5000)
+    descripcion_cliente: str = Field(default="", max_length=5000)
     id_especialidad_reportada_cliente: int
 
     @field_validator("descripcion_cliente")
     @classmethod
     def normalize_description(cls, value: str) -> str:
         normalized = " ".join(value.split())
-        if not normalized:
-            raise ValueError("descripcion_cliente must not be empty.")
         return normalized
 
 
@@ -87,6 +85,8 @@ class IncidentDetailResponse(BaseModel):
     customer_recommendation: str | None = None
     operator_notes: str | None = None
     visual_evidence_tags: list[str] = Field(default_factory=list)
+    audio_summary: str | None = None
+    audio_analysis_type: str = "NO_AUDIO"
     diagnostico_ia_json: dict[str, Any] | None = None
     confianza_ia: Decimal | None = None
     transcripcion_audio: str | None = None
@@ -112,6 +112,8 @@ class IncidentClassificationResponse(BaseModel):
     customer_recommendation: str | None = None
     operator_notes: str | None = None
     visual_evidence_tags: list[str] = Field(default_factory=list)
+    audio_summary: str | None = None
+    audio_analysis_type: str = "NO_AUDIO"
 
 
 class WorkshopCandidateSummary(BaseModel):
@@ -202,6 +204,8 @@ class OperarioStructuredProfileResponse(BaseModel):
     customer_recommendation: str | None = None
     operator_notes: str | None = None
     visual_evidence_tags: list[str] = Field(default_factory=list)
+    audio_summary: str | None = None
+    audio_analysis_type: str = "NO_AUDIO"
     transcripcion_audio: str | None = None
     etiquetas_imagen: Any | None = None
     herramientas_sugeridas: list[str] | None = None

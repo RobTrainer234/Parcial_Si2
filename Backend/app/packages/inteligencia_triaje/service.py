@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
@@ -39,7 +40,16 @@ from .ai_provider import (
     TriageProviderNotConfiguredError,
     run_multimodal_triage,
 )
+from .audio_provider import (
+    AudioProviderError,
+    AudioProviderNotConfiguredError,
+    AudioTranscriptionInput,
+    transcribe_audio,
+)
 from .diagnosis_utils import (
+    MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+    NO_AUDIO_ANALYSIS,
+    SPEECH_TRANSCRIPTION_ANALYSIS,
     TriageDiagnosisDetails,
     build_triage_details_from_ai_result,
     build_triage_details_from_payload,
@@ -75,6 +85,14 @@ from .storage import (
 
 
 MAX_IMAGE_FILES = 5
+MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".webm", ".aac"}
+NON_VERBAL_AUDIO_NOTE = (
+    "Audio no verbal o sonido mecanico detectado. No se obtuvo transcripcion util."
+)
+AUDIO_TRANSCRIPTION_UNAVAILABLE_NOTE = (
+    "No se pudo transcribir el audio automaticamente. Se requiere revision manual."
+)
 TRIAGE_ELIGIBLE_STATES = {"EN_TRIAJE", "DIAGNOSTICADO"}
 MATCHMAKING_ELIGIBLE_STATES = {"EN_TRIAJE", "DIAGNOSTICADO", "EN_MATCHMAKING"}
 OPERARIO_PROFILE_ALLOWED_SERVICE_STATES = {
@@ -131,10 +149,21 @@ def _validate_files(
 
     if audio_file is not None:
         content_type = audio_file.content_type or ""
+        extension = Path(audio_file.filename or "").suffix.lower()
         if not content_type.startswith(AUDIO_MIME_PREFIX):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid audio file type.",
+            )
+        if extension not in ALLOWED_AUDIO_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid audio file extension.",
+            )
+        if _get_upload_size_bytes(audio_file) > MAX_AUDIO_FILE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Audio file is too large.",
             )
 
     for image in image_files:
@@ -144,6 +173,110 @@ def _validate_files(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid image file type.",
             )
+
+
+def _get_upload_size_bytes(upload: UploadFile) -> int:
+    try:
+        current_position = upload.file.tell()
+        upload.file.seek(0, 2)
+        size = upload.file.tell()
+        upload.file.seek(current_position)
+        return max(size, 0)
+    except (AttributeError, OSError, ValueError):
+        return 0
+
+
+def _normalize_multiline_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.split())
+    return normalized or None
+
+
+def _is_meaningful_audio_transcript(value: str | None) -> bool:
+    normalized = _normalize_multiline_text(value)
+    if normalized is None:
+        return False
+    lowered = normalized.lower()
+    if lowered in {
+        NON_VERBAL_AUDIO_NOTE.lower(),
+        AUDIO_TRANSCRIPTION_UNAVAILABLE_NOTE.lower(),
+        "[music]",
+        "[silence]",
+        "(silence)",
+        "...",
+    }:
+        return False
+    letters = sum(1 for char in normalized if char.isalpha())
+    return letters >= 6 and len(normalized) >= 8
+
+
+def _build_audio_summary(
+    *,
+    audio_analysis_type: str,
+    transcript_text: str | None,
+) -> str | None:
+    if audio_analysis_type == NO_AUDIO_ANALYSIS:
+        return None
+    if audio_analysis_type == SPEECH_TRANSCRIPTION_ANALYSIS and transcript_text:
+        return (
+            "Audio con explicacion verbal del cliente. "
+            f"Transcripcion relevante: {transcript_text[:280]}"
+        )
+    return (
+        "Audio sin voz clara o con sonido mecanico. "
+        "El analisis acustico se trata como evidencia experimental y requiere validacion manual."
+    )
+
+
+def _transcribe_audio_media(
+    audio_input: AIMediaInput,
+) -> tuple[str | None, str, str | None, str | None]:
+    try:
+        result = transcribe_audio(
+            audio_input=AudioTranscriptionInput(
+                content_bytes=audio_input.content_bytes,
+                filename=Path(audio_input.locator).name or "incident-audio.webm",
+                mime_type=audio_input.mime_type,
+            ),
+            prompt=(
+                "Transcribe fielmente la voz del cliente en espanol si existe. "
+                "Si el audio solo contiene ruido, motor o sonidos mecanicos, devuelve el mejor resultado posible."
+            ),
+        )
+    except (AudioProviderError, AudioProviderNotConfiguredError) as exc:
+        logger.warning("Audio transcription failed: %s", exc)
+        return (
+            AUDIO_TRANSCRIPTION_UNAVAILABLE_NOTE,
+            MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+            _build_audio_summary(
+                audio_analysis_type=MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+                transcript_text=None,
+            ),
+            "audio_transcription_failed",
+        )
+
+    if _is_meaningful_audio_transcript(result.transcript_text):
+        transcript_text = _normalize_multiline_text(result.transcript_text)
+        return (
+            transcript_text,
+            SPEECH_TRANSCRIPTION_ANALYSIS,
+            _build_audio_summary(
+                audio_analysis_type=SPEECH_TRANSCRIPTION_ANALYSIS,
+                transcript_text=transcript_text,
+            ),
+            result.warning,
+        )
+
+    return (
+        NON_VERBAL_AUDIO_NOTE,
+        MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+        _build_audio_summary(
+            audio_analysis_type=MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+            transcript_text=None,
+        ),
+        result.warning or "non_verbal_or_mechanical_sound_detected",
+    )
 
 
 def _get_owned_vehicle(db: Session, *, vehicle_id: int, cliente_id: int) -> Vehiculo:
@@ -250,9 +383,41 @@ def _build_triage_details(incident: Incidente) -> TriageDiagnosisDetails:
     )
 
 
+def _resolve_audio_response_fields(
+    incident: Incidente,
+    triage_details: TriageDiagnosisDetails,
+) -> tuple[str | None, str]:
+    if triage_details.audio_analysis_type != NO_AUDIO_ANALYSIS:
+        return triage_details.audio_summary, triage_details.audio_analysis_type
+    if _is_meaningful_audio_transcript(incident.transcripcion_audio):
+        return (
+            _build_audio_summary(
+                audio_analysis_type=SPEECH_TRANSCRIPTION_ANALYSIS,
+                transcript_text=incident.transcripcion_audio,
+            ),
+            SPEECH_TRANSCRIPTION_ANALYSIS,
+        )
+    if incident.transcripcion_audio in {
+        NON_VERBAL_AUDIO_NOTE,
+        AUDIO_TRANSCRIPTION_UNAVAILABLE_NOTE,
+    }:
+        return (
+            _build_audio_summary(
+                audio_analysis_type=MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+                transcript_text=None,
+            ),
+            MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+        )
+    return None, NO_AUDIO_ANALYSIS
+
+
 def _build_incident_detail_response(incident: Incidente) -> IncidentDetailResponse:
     ordered_evidences = sorted(incident.evidencias, key=lambda item: item.id_evidencia)
     triage_details = _build_triage_details(incident)
+    audio_summary, audio_analysis_type = _resolve_audio_response_fields(
+        incident,
+        triage_details,
+    )
     return IncidentDetailResponse(
         incident_id=incident.id_incidente,
         status=incident.estado,
@@ -271,6 +436,8 @@ def _build_incident_detail_response(incident: Incidente) -> IncidentDetailRespon
         customer_recommendation=triage_details.customer_recommendation,
         operator_notes=triage_details.operator_notes,
         visual_evidence_tags=triage_details.visual_evidence_tags,
+        audio_summary=audio_summary,
+        audio_analysis_type=audio_analysis_type,
         diagnostico_ia_json=incident.diagnostico_ia_json,
         confianza_ia=incident.confianza_ia,
         transcripcion_audio=incident.transcripcion_audio,
@@ -374,6 +541,10 @@ def _build_operario_structured_profile_response(
     ordered_evidences = sorted(incident.evidencias, key=lambda item: item.id_evidencia)
     diagnostico = incident.diagnostico_ia_json or {}
     triage_details = _build_triage_details(incident)
+    audio_summary, audio_analysis_type = _resolve_audio_response_fields(
+        incident,
+        triage_details,
+    )
     return OperarioStructuredProfileResponse(
         service_id=service.id_servicio,
         service_state=service.estado,
@@ -398,6 +569,8 @@ def _build_operario_structured_profile_response(
         customer_recommendation=triage_details.customer_recommendation,
         operator_notes=triage_details.operator_notes,
         visual_evidence_tags=triage_details.visual_evidence_tags,
+        audio_summary=audio_summary,
+        audio_analysis_type=audio_analysis_type,
         transcripcion_audio=incident.transcripcion_audio,
         etiquetas_imagen=incident.etiquetas_imagen,
         herramientas_sugeridas=_extract_profile_list(
@@ -441,6 +614,8 @@ def _build_incident_classification_response(
         customer_recommendation=triage_details.customer_recommendation,
         operator_notes=triage_details.operator_notes,
         visual_evidence_tags=triage_details.visual_evidence_tags,
+        audio_summary=triage_details.audio_summary,
+        audio_analysis_type=triage_details.audio_analysis_type,
     )
 
 
@@ -1026,6 +1201,43 @@ def _load_incident_media_inputs(
     return images, audio_input
 
 
+def _resolve_incident_audio_context(
+    *,
+    incident: Incidente,
+    audio_input: AIMediaInput | None,
+) -> tuple[str | None, str, str | None, str | None]:
+    if audio_input is None:
+        return None, NO_AUDIO_ANALYSIS, None, None
+
+    stored_transcript = _normalize_multiline_text(incident.transcripcion_audio)
+    if _is_meaningful_audio_transcript(stored_transcript):
+        return (
+            stored_transcript,
+            SPEECH_TRANSCRIPTION_ANALYSIS,
+            _build_audio_summary(
+                audio_analysis_type=SPEECH_TRANSCRIPTION_ANALYSIS,
+                transcript_text=stored_transcript,
+            ),
+            None,
+        )
+    if stored_transcript == NON_VERBAL_AUDIO_NOTE:
+        return (
+            stored_transcript,
+            MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+            _build_audio_summary(
+                audio_analysis_type=MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+                transcript_text=None,
+            ),
+            "non_verbal_or_mechanical_sound_detected",
+        )
+
+    transcript_text, analysis_type, audio_summary, audio_warning = _transcribe_audio_media(
+        audio_input
+    )
+    incident.transcripcion_audio = transcript_text
+    return transcript_text, analysis_type, audio_summary, audio_warning
+
+
 def _record_triage_failure_event(
     *,
     db: Session,
@@ -1296,12 +1508,27 @@ def _execute_incident_classification(
     specialties, specialty_map = _get_specialty_catalog(db)
     specialty_names = [item.nombre for item in specialties]
     images, audio_input = _load_incident_media_inputs(incident)
+    (
+        audio_transcript,
+        audio_analysis_type,
+        audio_summary,
+        audio_warning,
+    ) = _resolve_incident_audio_context(
+        incident=incident,
+        audio_input=audio_input,
+    )
     provider_result, provider_metadata = run_multimodal_triage(
         description=incident.descripcion_cliente,
         reported_specialty_name=incident.especialidad_reportada_cliente.nombre,
         specialty_names=specialty_names,
         images=images,
         audio=audio_input,
+        audio_transcript=audio_transcript,
+        audio_analysis_type=audio_analysis_type,
+        audio_warning=audio_warning,
+    )
+    provider_metadata["manual_review_confidence_threshold"] = (
+        settings.manual_review_confidence_threshold
     )
 
     detected_specialty = _map_detected_specialty(
@@ -1376,7 +1603,10 @@ def _execute_incident_classification(
         visual_evidence_tags=provider_result.visual_evidence_tags,
         provider_requires_manual_review=provider_result.requires_manual_review,
         min_confidence=settings.triage_min_confidence,
+        manual_review_confidence_threshold=settings.manual_review_confidence_threshold,
         image_count=len(images),
+        audio_summary=provider_result.audio_summary or audio_summary,
+        audio_analysis_type=provider_result.audio_analysis_type or audio_analysis_type,
         specialty_override_reason=specialty_override_reason,
         suppress_manual_review_reasons=suppress_manual_review_reasons,
     )
@@ -1405,7 +1635,7 @@ def _execute_incident_classification(
         min_confidence=settings.triage_min_confidence,
     )
     incident.confianza_ia = confidence_value
-    incident.transcripcion_audio = provider_result.audio_transcript
+    incident.transcripcion_audio = audio_transcript
     incident.etiquetas_imagen = triage_details.visual_evidence_tags or None
     incident.severidad = triage_details.severity
     incident.fecha_triaje = utc_now()
@@ -1571,6 +1801,12 @@ def report_incident(
     user_agent: str | None,
 ) -> IncidentReportResponse:
     _validate_files(audio_file=audio_file, image_files=image_files)
+    normalized_description = _normalize_multiline_text(payload.descripcion_cliente) or ""
+    if not normalized_description and not image_files and audio_file is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agrega una descripcion, una foto o un audio para reportar el incidente.",
+        )
     cliente_id = current_user.id_persona
     storage = get_triage_storage()
     stored_media: list[StoredMedia] = []
@@ -1583,7 +1819,7 @@ def report_incident(
             id_cliente=cliente_id,
             id_vehiculo=payload.id_vehiculo,
             id_especialidad_reportada_cliente=payload.id_especialidad_reportada_cliente,
-            descripcion_cliente=payload.descripcion_cliente,
+            descripcion_cliente=normalized_description,
             latitud=payload.latitud,
             longitud=payload.longitud,
             estado="REPORTADO",
@@ -1627,6 +1863,21 @@ def report_incident(
             )
             db.add(evidence)
             evidences.append(evidence)
+            try:
+                audio_bytes = stored.absolute_path.read_bytes()
+            except OSError as exc:
+                raise StorageError("Stored audio file could not be read.") from exc
+            audio_media_input = AIMediaInput(
+                content_bytes=audio_bytes,
+                mime_type=stored.mime_type or "application/octet-stream",
+                locator=stored.locator,
+            )
+            (
+                incident.transcripcion_audio,
+                _audio_analysis_type,
+                _audio_summary,
+                _audio_warning,
+            ) = _transcribe_audio_media(audio_media_input)
 
         incident.estado = "EN_TRIAJE"
 

@@ -49,5 +49,7 @@
 	<string>Usamos tu ubicación para registrar el punto del incidente y buscar asistencia cercana.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Usamos tus fotos solo si decides adjuntarlas como evidencia del incidente.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Usamos el micrófono para grabar el audio del incidente y mejorar el diagnóstico de la falla.</string>
 </dict>
 </plist>

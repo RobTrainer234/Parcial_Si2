@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
@@ -48,6 +49,7 @@ from app.packages.inteligencia_triaje.storage import (
 )
 from app.packages.seguridad_usuarios.security import utc_now
 
+from .ai_reports import build_dashboard_voice_report
 from .dependencies import WorkshopAdminContext
 from .schemas import (
     AssignedOperarioSummary,
@@ -61,7 +63,12 @@ from .schemas import (
     SpecialtySummaryResponse,
     StaffSpecialtyResponse,
     UsedSparePartResponse,
+    VoiceDashboardFiltersResponse,
+    VoiceDashboardIntentResponse,
+    VoiceDashboardReportResponse,
     WaitingAssignmentServiceSummary,
+    WorkshopIncidentEvidenceResponse,
+    WorkshopIncidentEvidenceSummaryResponse,
     WorkshopServiceHistoryDetailResponse,
     WorkshopServiceHistorySummary,
     WorkshopRequestDecisionRequest,
@@ -109,6 +116,7 @@ REPAIR_REPORT_NEXT_STATE = "COMPLETADO_PENDIENTE_CONFIRMACION"
 REPORT_NOTES_VERSION = 1
 WORKSHOP_IMAGE_MIME_PREFIX = "image/"
 WORKSHOP_CERTIFICATE_ALLOWED_MIME_PREFIXES = ("application/pdf", "image/")
+VOICE_REPORT_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".webm", ".aac"}
 PREQUOTATION_CURRENCY = "BOB"
 PREQUOTATION_SEVERITY_FACTORS: dict[str, Decimal] = {
     "BAJA": Decimal("1.00"),
@@ -169,6 +177,7 @@ def _build_request_query():
         joinedload(SolicitudServicio.servicio),
         joinedload(SolicitudServicio.incidente).joinedload(Incidente.especialidad_reportada_cliente),
         joinedload(SolicitudServicio.incidente).joinedload(Incidente.especialidad_detectada),
+        joinedload(SolicitudServicio.incidente).selectinload(Incidente.evidencias),
     )
 
 
@@ -182,6 +191,9 @@ def _build_service_query():
         joinedload(Servicio.solicitud)
         .joinedload(SolicitudServicio.incidente)
         .joinedload(Incidente.especialidad_reportada_cliente),
+        joinedload(Servicio.solicitud)
+        .joinedload(SolicitudServicio.incidente)
+        .selectinload(Incidente.evidencias),
         joinedload(Servicio.operario).joinedload(Operario.persona),
     )
 
@@ -1038,6 +1050,28 @@ def _build_specialty_summary(specialty: Especialidad | None) -> SpecialtySummary
     return SpecialtySummaryResponse(
         id_especialidad=specialty.id_especialidad,
         nombre=specialty.nombre,
+    )
+
+
+def _serialize_incident_evidence(evidence: Evidencia) -> WorkshopIncidentEvidenceResponse:
+    return WorkshopIncidentEvidenceResponse(
+        id_evidencia=evidence.id_evidencia,
+        tipo_evidencia=evidence.tipo_evidencia,
+        categoria=evidence.categoria,
+        url_archivo=build_public_media_url(evidence.url_archivo),
+        mime_type=evidence.mime_type,
+        tamano_bytes=evidence.tamano_bytes,
+        fecha_registro=evidence.fecha_registro,
+    )
+
+
+def _build_incident_evidence_summary(
+    evidences: list[Evidencia],
+) -> WorkshopIncidentEvidenceSummaryResponse:
+    return WorkshopIncidentEvidenceSummaryResponse(
+        total=len(evidences),
+        imagenes=sum(1 for item in evidences if item.tipo_evidencia == "IMAGEN"),
+        audio=sum(1 for item in evidences if item.tipo_evidencia == "AUDIO"),
     )
 
 
@@ -2484,6 +2518,55 @@ def get_workshop_dashboard_overview(
     )
 
 
+def create_workshop_dashboard_voice_report(
+    *,
+    admin_context: WorkshopAdminContext,
+    db: Session,
+    audio_file: UploadFile,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    scope: str | None = None,
+) -> VoiceDashboardReportResponse:
+    resolved_scope = (scope or "TALLER").strip().upper() or "TALLER"
+    content_type = audio_file.content_type or ""
+    extension = Path(audio_file.filename or "").suffix.lower()
+    if (
+        not content_type.startswith("audio/")
+        or extension not in VOICE_REPORT_ALLOWED_AUDIO_EXTENSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid dashboard audio file type.",
+        )
+
+    overview = get_workshop_dashboard_overview(
+        admin_context=admin_context,
+        db=db,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    try:
+        audio_file.file.seek(0)
+        audio_bytes = audio_file.file.read()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dashboard audio file could not be read.",
+        ) from exc
+    finally:
+        audio_file.file.seek(0)
+
+    return build_dashboard_voice_report(
+        audio_bytes=audio_bytes,
+        filename=audio_file.filename or "dashboard-report.webm",
+        mime_type=content_type or "application/octet-stream",
+        overview=overview,
+        scope=resolved_scope,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
 def list_workshop_staff(
     *,
     admin_context: WorkshopAdminContext,
@@ -3292,6 +3375,8 @@ def _serialize_request_summary(request_row: SolicitudServicio) -> WorkshopReques
         distance_km=_build_distance_km(request_row),
         detected_specialty=_build_specialty_summary(request_row.incidente.especialidad_detectada),
         severity=request_row.incidente.severidad,
+        confidence=request_row.incidente.confianza_ia,
+        requires_manual_review=request_row.incidente.requiere_revision_manual,
         ai_summary=request_row.incidente.diagnostico_ia_resumen,
         used_insurance_priority=request_row.prioridad_seguro,
         attempt_number=request_row.intento_numero,
@@ -3308,6 +3393,7 @@ def _serialize_request_detail(
 ) -> WorkshopRequestDetailResponse:
     service = request_row.servicio
     incident = request_row.incidente
+    ordered_evidences = sorted(incident.evidencias, key=lambda item: item.id_evidencia)
     triage_details = build_triage_details_from_payload(
         payload=incident.diagnostico_ia_json,
         detected_specialty_name=(
@@ -3342,14 +3428,20 @@ def _serialize_request_detail(
         ),
         detected_specialty=_build_specialty_summary(incident.especialidad_detectada),
         severity=incident.severidad,
+        confidence=incident.confianza_ia,
+        requires_manual_review=incident.requiere_revision_manual,
         ai_summary=triage_details.summary,
         specific_diagnosis=triage_details.specific_diagnosis,
         suggested_service=triage_details.suggested_service,
         customer_recommendation=triage_details.customer_recommendation,
         operator_notes=triage_details.operator_notes,
         visual_evidence_tags=triage_details.visual_evidence_tags,
+        audio_summary=triage_details.audio_summary,
+        audio_analysis_type=triage_details.audio_analysis_type,
         transcripcion_audio=incident.transcripcion_audio,
         image_labels=incident.etiquetas_imagen,
+        evidence_summary=_build_incident_evidence_summary(ordered_evidences),
+        evidences=[_serialize_incident_evidence(item) for item in ordered_evidences],
         service_id=service.id_servicio if service is not None else None,
         service_state=service.estado if service is not None else None,
         prequotation_code=service.codigo_precotizacion if service is not None else None,

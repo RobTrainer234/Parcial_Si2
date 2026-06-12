@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
 
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -36,10 +38,12 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
   final _lonController = TextEditingController();
   final _descController = TextEditingController();
   final _imagePicker = ImagePicker();
+  final _audioRecorder = AudioRecorder();
 
   bool _isSubmitting = false;
   bool _isGettingLocation = false;
   bool _isPickingImages = false;
+  bool _isRecordingAudio = false;
   bool _showManualLocation = false;
 
   VehicleModel? _selectedVehicle;
@@ -49,9 +53,14 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
   _LocationUiState _locationUiState = _LocationUiState.pending;
   String _locationMessage = 'Ubicación pendiente.';
   List<XFile> _selectedImages = const [];
+  String? _recordedAudioPath;
+  Duration _recordedAudioDuration = Duration.zero;
+  Timer? _recordingTimer;
 
   @override
   void dispose() {
+    _recordingTimer?.cancel();
+    unawaited(_audioRecorder.dispose());
     _latController.dispose();
     _lonController.dispose();
     _descController.dispose();
@@ -194,6 +203,96 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
     });
   }
 
+  Future<void> _startAudioRecording() async {
+    if (_isSubmitting || _isRecordingAudio) return;
+    try {
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        _showMessage(
+          'No se concedió permiso para usar el micrófono.',
+          isError: true,
+        );
+        return;
+      }
+
+      final outputPath =
+          '${Directory.systemTemp.path}/incident_audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: outputPath,
+      );
+      _recordingTimer?.cancel();
+      setState(() {
+        _isRecordingAudio = true;
+        _recordedAudioPath = outputPath;
+        _recordedAudioDuration = Duration.zero;
+      });
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || !_isRecordingAudio) return;
+        setState(() {
+          _recordedAudioDuration += const Duration(seconds: 1);
+        });
+      });
+    } catch (_) {
+      _showMessage(
+        'No se pudo iniciar la grabación de audio.',
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> _stopAudioRecording() async {
+    if (!_isRecordingAudio) return;
+    try {
+      final recordedPath = await _audioRecorder.stop();
+      _recordingTimer?.cancel();
+      if (!mounted) return;
+      setState(() {
+        _isRecordingAudio = false;
+        if (recordedPath != null && recordedPath.trim().isNotEmpty) {
+          _recordedAudioPath = recordedPath;
+        }
+      });
+    } catch (_) {
+      _recordingTimer?.cancel();
+      if (!mounted) return;
+      setState(() => _isRecordingAudio = false);
+      _showMessage(
+        'No se pudo finalizar la grabación.',
+        isError: true,
+      );
+    }
+  }
+
+  void _removeAudio() {
+    if (_isRecordingAudio) return;
+    setState(() {
+      _recordedAudioPath = null;
+      _recordedAudioDuration = Duration.zero;
+    });
+  }
+
+  String _buildAudioLabel() {
+    if (_isRecordingAudio) {
+      return 'Grabando audio: ${_formatDuration(_recordedAudioDuration)}';
+    }
+    if (_recordedAudioPath == null || _recordedAudioPath!.isEmpty) {
+      return 'No se adjuntó audio. Puedes grabar una explicación del incidente.';
+    }
+    final fileName = _recordedAudioPath!.replaceAll('\\', '/').split('/').last;
+    return 'Audio listo: $fileName · ${_formatDuration(_recordedAudioDuration)}';
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
   void _syncManualLocation() {
     final lat = double.tryParse(_latController.text.trim());
     final lon = double.tryParse(_lonController.text.trim());
@@ -307,8 +406,12 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
     }
 
     final description = _descController.text.trim();
-    if (description.length < 10) {
-      _showMessage('Describe el problema con más detalle.', isError: true);
+    final hasAudio = _recordedAudioPath != null && _recordedAudioPath!.isNotEmpty;
+    if (description.isEmpty && _selectedImages.isEmpty && !hasAudio) {
+      _showMessage(
+        'Agrega una descripción, una foto o un audio para reportar el incidente.',
+        isError: true,
+      );
       return;
     }
 
@@ -331,6 +434,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                 descripcionCliente: description,
                 specialtyId: _selectedSpecialty!.idEspecialidad,
                 images: _selectedImages,
+                audioPath: _recordedAudioPath,
               );
 
       if (mounted) {
@@ -584,9 +688,9 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                 enabled: !_isSubmitting,
                 validator: (value) {
                   final normalized = value?.trim() ?? '';
-                  if (normalized.isEmpty) return 'Ingresa una descripción';
-                  if (normalized.length < 10) {
-                    return 'Mínimo 10 caracteres';
+                  if (normalized.isEmpty) return null;
+                  if (normalized.length < 5) {
+                    return 'Describe un poco más el problema';
                   }
                   return null;
                 },
@@ -693,7 +797,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
             const _SectionLabel(title: 'Evidencias opcionales'),
             const SizedBox(height: 8),
             Text(
-              'Agrega fotos si ayudan a mostrar la falla, el tablero o la llanta.',
+              'Agrega fotos o un audio si ayudan a mostrar la falla, el tablero, la llanta o el sonido del vehículo.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -737,8 +841,36 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                     ),
                   ],
                   const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppPrimaryButton(
+                          label: _isRecordingAudio
+                              ? 'Detener grabación'
+                              : 'Grabar audio',
+                          icon: _isRecordingAudio
+                              ? Icons.stop_circle_outlined
+                              : Icons.mic_none_rounded,
+                          onPressed: _isSubmitting
+                              ? null
+                              : (_isRecordingAudio
+                                  ? _stopAudioRecording
+                                  : _startAudioRecording),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed:
+                            _isSubmitting || _isRecordingAudio || _recordedAudioPath == null
+                                ? null
+                                : _removeAudio,
+                        child: const Text('Eliminar audio'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
                   Text(
-                    'El audio se agregará en una etapa posterior.',
+                    _buildAudioLabel(),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -748,7 +880,9 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
             ),
             const SizedBox(height: 24),
             AppPrimaryButton(
-              label: _isSubmitting ? 'Enviando reporte...' : 'Enviar reporte',
+              label: _isSubmitting
+                  ? 'Enviando y transcribiendo...'
+                  : 'Enviar reporte',
               icon: Icons.send_rounded,
               isLoading: _isSubmitting,
               onPressed: _isSubmitting ? null : _submit,

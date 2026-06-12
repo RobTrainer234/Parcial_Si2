@@ -78,7 +78,7 @@ class _IncidentDiagnosisPageState extends ConsumerState<IncidentDiagnosisPage> {
         icon: const Icon(Icons.arrow_back_rounded),
       ),
       child: state.when(
-        loading: () => const AppLoading(message: 'Cargando diagnostico...'),
+        loading: () => const AppLoading(message: 'Analizando incidente...'),
         error: (error, _) => AppErrorView(
           message: _mapDiagnosisError(error),
           onRetry: () => ref
@@ -126,19 +126,14 @@ class _DiagnosisContent extends StatelessWidget {
       detail.customerRecommendation ?? classification?.customerRecommendation;
   String? get _operatorNotes =>
       detail.operatorNotes ?? classification?.operatorNotes;
-  List<String> get _visualEvidenceTags {
-    if (detail.visualEvidenceTags.isNotEmpty) {
-      return detail.visualEvidenceTags;
-    }
-    return classification?.visualEvidenceTags ?? const [];
-  }
+  String? get _audioTranscript => detail.audioTranscript;
+  String? get _audioSummary => detail.audioSummary;
 
   bool get _hasDiagnosisSections =>
       _specificDiagnosis != null ||
       _suggestedService != null ||
       _customerRecommendation != null ||
       _operatorNotes != null ||
-      _visualEvidenceTags.isNotEmpty ||
       (_summary != null && _summary!.trim().isNotEmpty);
 
   bool get _canGoToMatchmaking =>
@@ -229,6 +224,41 @@ class _DiagnosisContent extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Transcripción del audio',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _audioTranscript ?? 'No se adjuntó audio.',
+                style: theme.textTheme.bodyMedium,
+              ),
+              if (_audioSummary != null && _audioSummary!.trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _audioSummary!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              if (detail.hasExperimentalAudioAnalysis) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'El audio no contiene voz clara. El análisis por sonido mecánico es experimental.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
         if (_imageTechnicalMessage != null) ...[
           const SizedBox(height: 16),
           AppCard(
@@ -292,11 +322,6 @@ class _DiagnosisContent extends StatelessWidget {
                     title: 'Notas para el taller / operario',
                     value: _operatorNotes!,
                   ),
-                if (_visualEvidenceTags.isNotEmpty)
-                  _DiagnosisSection(
-                    title: 'Evidencias visuales',
-                    value: _visualEvidenceTags.join(', '),
-                  ),
                 if (_summary != null && _summary!.trim().isNotEmpty)
                   _DiagnosisSection(
                     title: 'Resumen final',
@@ -323,16 +348,18 @@ class _DiagnosisContent extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  Icons.warning_amber_rounded,
+                  Icons.fact_check_outlined,
                   size: 24,
-                  color: Colors.orange.shade700,
+                  color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'La IA no tiene certeza completa. El taller realizará diagnóstico físico.',
+                    (_confidence != null && _confidence! < 50)
+                        ? 'La IA no tuvo suficiente confianza. Este resultado no es definitivo y requiere revisión manual.'
+                        : 'Diagnóstico preliminar generado. El taller realizará una revisión física para confirmar la asistencia requerida.',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.orange.shade700,
+                      color: theme.colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -505,6 +532,14 @@ class _DiagnosisNoticeCard extends StatelessWidget {
 
 String _mapDiagnosisError(Object error) {
   if (error is ApiException) {
+    final detail = _extractBackendDetail(error);
+    final localizedDetail = localizeBackendMessage(detail);
+    if (localizedDetail.isNotEmpty && localizedDetail != detail) {
+      return localizedDetail;
+    }
+    if (detail.isNotEmpty) {
+      return detail;
+    }
     if (error.statusCode == 404) {
       return 'No se encontro el incidente.';
     }
@@ -526,17 +561,26 @@ String _mapDiagnosisError(Object error) {
 
 _DiagnosisNotice _mapDiagnosisNotice(Object error) {
   if (error is ApiException) {
+    final detail = _extractBackendDetail(error);
+    final localizedDetail = localizeBackendMessage(detail);
+    final backendMessage =
+        localizedDetail.isNotEmpty && localizedDetail != detail
+        ? localizedDetail
+        : detail;
     if (error.statusCode == 502 || error.statusCode == 503) {
-      return const _DiagnosisNotice(
+      return _DiagnosisNotice(
         title: 'Diagnostico no disponible',
-        message:
-            'No pudimos generar el diagnostico automatico en este momento. Puedes intentar nuevamente mas tarde.',
+        message: backendMessage.isNotEmpty
+            ? backendMessage
+            : 'No pudimos generar el diagnostico automatico en este momento. Puedes intentar nuevamente mas tarde.',
       );
     }
     if (error.statusCode == 409) {
-      return const _DiagnosisNotice(
+      return _DiagnosisNotice(
         title: 'Diagnostico pendiente',
-        message: 'El incidente aun no esta listo para ser diagnosticado.',
+        message: backendMessage.isNotEmpty
+            ? backendMessage
+            : 'El incidente aun no esta listo para ser diagnosticado.',
       );
     }
   }
@@ -544,4 +588,30 @@ _DiagnosisNotice _mapDiagnosisNotice(Object error) {
     title: 'No se pudo generar el diagnostico',
     message: _mapDiagnosisError(error),
   );
+}
+
+String _extractBackendDetail(ApiException error) {
+  final details = error.details;
+  if (details is String) {
+    return details.trim();
+  }
+  if (details is Map<String, dynamic>) {
+    final detail = details['detail'];
+    if (detail is String) {
+      return detail.trim();
+    }
+    if (detail is List) {
+      return detail.map((item) => item.toString()).join(', ').trim();
+    }
+  }
+  if (details is Map) {
+    final detail = details['detail'];
+    if (detail is String) {
+      return detail.trim();
+    }
+    if (detail is List) {
+      return detail.map((item) => item.toString()).join(', ').trim();
+    }
+  }
+  return '';
 }

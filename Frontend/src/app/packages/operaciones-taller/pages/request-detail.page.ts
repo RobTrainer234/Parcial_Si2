@@ -161,6 +161,16 @@ type DecisionConflictAction = 'catalog' | null;
                     <strong>{{ data.severity || 'Sin severidad' }}</strong>
                   </div>
                   <div class="summary-item">
+                    <span class="text-muted">Confianza IA</span>
+                    <strong>
+                      {{ formatNumber(data.confidence) }}{{ data.confidence !== null && data.confidence !== undefined ? '%' : '' }}
+                    </strong>
+                  </div>
+                  <div class="summary-item">
+                    <span class="text-muted">Revision manual</span>
+                    <strong>{{ data.requires_manual_review ? 'Requerida' : 'No' }}</strong>
+                  </div>
+                  <div class="summary-item">
                     <span class="text-muted">Ubicacion</span>
                     <strong>{{ formatCoordinate(data.incident_latitud) }}, {{ formatCoordinate(data.incident_longitud) }}</strong>
                   </div>
@@ -213,12 +223,49 @@ type DecisionConflictAction = 'catalog' | null;
                   </div>
                 }
 
+                @if (data.audio_summary) {
+                  <div class="copy-block">
+                    <span class="text-muted">Resumen de audio</span>
+                    <p>{{ data.audio_summary }}</p>
+                  </div>
+                }
+
+                @if (isExperimentalAudioAnalysis(data.audio_analysis_type)) {
+                  <div class="warning-copy">
+                    El audio no contiene voz clara. El analisis por sonido mecanico es experimental.
+                  </div>
+                }
+
+                @if (data.requires_manual_review) {
+                  <div class="warning-copy">
+                    La IA no tuvo suficiente confianza. El caso requiere revision manual antes de continuar.
+                  </div>
+                }
+
                 @if (imageLabelsText()) {
                   <div class="copy-block">
                     <span class="text-muted">Etiquetas de imagen</span>
                     <p>{{ imageLabelsText() }}</p>
                   </div>
                 }
+
+                <div class="copy-block">
+                  <span class="text-muted">Archivos adjuntos</span>
+                  <p>
+                    {{ data.evidence_summary.imagenes }} imagen(es),
+                    {{ data.evidence_summary.audio }} audio(s),
+                    total {{ data.evidence_summary.total }}.
+                  </p>
+                  @if (data.evidences?.length) {
+                    <div class="media-links">
+                      @for (item of data.evidences; track item.id_evidencia) {
+                        <a [href]="item.url_archivo" target="_blank" rel="noopener">
+                          {{ item.tipo_evidencia }} #{{ item.id_evidencia }}
+                        </a>
+                      }
+                    </div>
+                  }
+                </div>
               </div>
             </app-card>
 
@@ -379,6 +426,20 @@ type DecisionConflictAction = 'catalog' | null;
         line-height: 1.6;
       }
 
+      .media-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        margin-top: var(--space-3);
+      }
+
+      .warning-copy {
+        padding: var(--space-4);
+        border-radius: var(--radius-lg);
+        background: color-mix(in srgb, #f59e0b 12%, var(--color-surface));
+        border: 1px solid color-mix(in srgb, #f59e0b 28%, var(--color-border));
+      }
+
       .decision-actions {
         display: flex;
         gap: var(--space-3);
@@ -481,6 +542,10 @@ export class RequestDetailPage {
 
     return tags.join(', ');
   });
+
+  protected isExperimentalAudioAnalysis(value: string | null | undefined): boolean {
+    return (value ?? '').trim().toUpperCase() === 'MECHANICAL_SOUND_EXPERIMENTAL';
+  }
 
   constructor() {
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {

@@ -37,6 +37,9 @@ class OperatorServiceDetailModel {
   final String? suggestedService;
   final String? customerRecommendation;
   final String? operatorNotes;
+  final String? audioTranscript;
+  final String? audioSummary;
+  final String audioAnalysisType;
   final List<String> visualEvidenceTags;
   final dynamic imageLabels;
   final List<String> suggestedTools;
@@ -66,6 +69,9 @@ class OperatorServiceDetailModel {
     this.suggestedService,
     this.customerRecommendation,
     this.operatorNotes,
+    this.audioTranscript,
+    this.audioSummary,
+    this.audioAnalysisType = 'NO_AUDIO',
     this.visualEvidenceTags = const [],
     this.imageLabels,
     this.suggestedTools = const [],
@@ -97,6 +103,9 @@ class OperatorServiceDetailModel {
       suggestedService: json['suggested_service'] as String?,
       customerRecommendation: json['customer_recommendation'] as String?,
       operatorNotes: json['operator_notes'] as String?,
+      audioTranscript: json['transcripcion_audio'] as String?,
+      audioSummary: json['audio_summary'] as String?,
+      audioAnalysisType: json['audio_analysis_type'] as String? ?? 'NO_AUDIO',
       visualEvidenceTags: (json['visual_evidence_tags'] as List<dynamic>? ?? [])
           .map((item) => item.toString().trim())
           .where((item) => item.isNotEmpty)

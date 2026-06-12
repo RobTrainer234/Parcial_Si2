@@ -49,7 +49,7 @@ def report_vehicle_incident(
     id_vehiculo: int = Form(...),
     latitud: Decimal = Form(...),
     longitud: Decimal = Form(...),
-    descripcion_cliente: str = Form(...),
+    descripcion_cliente: str = Form(""),
     id_especialidad_reportada_cliente: int = Form(...),
     audio: UploadFile | None = File(default=None),
     images: list[UploadFile] | None = File(default=None),

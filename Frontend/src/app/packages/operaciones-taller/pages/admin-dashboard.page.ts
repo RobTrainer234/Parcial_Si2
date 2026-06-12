@@ -13,6 +13,7 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge.co
 import {
   DashboardMonthlyRevenueItem,
   DashboardOverviewResponse,
+  VoiceDashboardReportResponse,
 } from '../data-access/workshop-dashboard.models';
 import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
 
@@ -199,6 +200,55 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
             }
           </app-card>
         </section>
+
+        <section class="section-grid">
+          <app-card
+            title="Reporte con IA por voz"
+            subtitle="Carga o graba un audio corto para pedir un resumen del dashboard."
+          >
+            <div class="voice-report">
+              <label class="app-button app-button--secondary voice-report__picker">
+                Seleccionar o grabar audio
+                <input
+                  type="file"
+                  accept="audio/*"
+                  capture="user"
+                  (change)="onVoiceAudioSelected($event)"
+                />
+              </label>
+              @if (selectedVoiceFileName()) {
+                <p class="text-muted">Archivo: {{ selectedVoiceFileName() }}</p>
+              }
+              @if (voiceReportLoading()) {
+                <p class="text-muted">Transcribiendo y generando reporte...</p>
+              }
+              @if (voiceReportError()) {
+                <p class="feedback feedback--error">{{ voiceReportError() }}</p>
+              }
+              @if (voiceReport(); as report) {
+                <div class="voice-report__result">
+                  <div>
+                    <span class="text-muted">Transcripcion</span>
+                    <p>{{ report.transcription || 'Sin transcripcion util.' }}</p>
+                  </div>
+                  <div>
+                    <span class="text-muted">Intencion interpretada</span>
+                    <p>{{ report.interpreted_intent.intent }}</p>
+                  </div>
+                  <div>
+                    <span class="text-muted">Reporte generado</span>
+                    <p>{{ report.generated_report }}</p>
+                  </div>
+                  @if (report.warnings.length) {
+                    <div class="warning-copy">
+                      {{ report.warnings.join(', ') }}
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </app-card>
+        </section>
       } @else {
         <app-empty-state
           title="Información no disponible"
@@ -307,6 +357,38 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         margin-top: var(--space-5);
       }
 
+      .voice-report {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      .voice-report__picker {
+        position: relative;
+        overflow: hidden;
+        display: inline-flex;
+        width: fit-content;
+      }
+
+      .voice-report__picker input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+
+      .voice-report__result p {
+        margin: var(--space-2) 0 0;
+        line-height: 1.6;
+      }
+
+      .warning-copy {
+        padding: var(--space-4);
+        border-radius: var(--radius-lg);
+        background: color-mix(in srgb, #f59e0b 12%, var(--color-surface));
+        border: 1px solid color-mix(in srgb, #f59e0b 28%, var(--color-border));
+      }
+
       .revenue-bars {
         display: flex;
         flex-direction: column;
@@ -361,6 +443,10 @@ export class AdminDashboardPage {
   protected readonly loading = signal(false);
   protected readonly error = signal('');
   protected readonly overview = signal<DashboardOverviewResponse | null>(null);
+  protected readonly voiceReportLoading = signal(false);
+  protected readonly voiceReportError = signal('');
+  protected readonly voiceReport = signal<VoiceDashboardReportResponse | null>(null);
+  protected readonly selectedVoiceFileName = signal('');
 
   protected readonly monthlyRevenue = computed(
     () => this.overview()?.financial.monthly_revenue ?? [],
@@ -391,6 +477,38 @@ export class AdminDashboardPage {
           this.loading.set(false);
         },
       });
+  }
+
+  protected onVoiceAudioSelected(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.item(0) ?? null;
+    if (!file) {
+      return;
+    }
+
+    this.selectedVoiceFileName.set(file.name);
+    this.voiceReportLoading.set(true);
+    this.voiceReportError.set('');
+
+    this.dashboardApi
+      .createVoiceReport(file)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.voiceReport.set(response);
+          this.voiceReportLoading.set(false);
+        },
+        error: () => {
+          this.voiceReportError.set(
+            'No se pudo generar el reporte por voz. Intenta nuevamente con un audio más claro.',
+          );
+          this.voiceReportLoading.set(false);
+        },
+      });
+
+    if (input) {
+      input.value = '';
+    }
   }
 
   protected formatInteger(value: number | string | null | undefined): string {

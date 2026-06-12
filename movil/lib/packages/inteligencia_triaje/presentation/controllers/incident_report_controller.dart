@@ -55,6 +55,7 @@ class IncidentSubmitController
     required String descripcionCliente,
     required int specialtyId,
     List<XFile> images = const [],
+    String? audioPath,
   }) async {
     state = const AsyncValue.loading();
     try {
@@ -65,6 +66,7 @@ class IncidentSubmitController
         descripcionCliente: descripcionCliente,
         specialtyId: specialtyId,
         images: images,
+        audioPath: audioPath,
       );
       state = AsyncValue.data(result);
       return result;
