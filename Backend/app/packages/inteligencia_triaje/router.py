@@ -51,6 +51,8 @@ def report_vehicle_incident(
     longitud: Decimal = Form(...),
     descripcion_cliente: str = Form(""),
     id_especialidad_reportada_cliente: int = Form(...),
+    local_uuid: str | None = Form(default=None),
+    offline_sync: bool = Form(False),
     audio: UploadFile | None = File(default=None),
     images: list[UploadFile] | None = File(default=None),
     current_user=Depends(require_cliente_user),
@@ -63,12 +65,14 @@ def report_vehicle_incident(
             "longitud": longitud,
             "descripcion_cliente": descripcion_cliente,
             "id_especialidad_reportada_cliente": id_especialidad_reportada_cliente,
+            "local_uuid": local_uuid,
         }
     )
     return report_incident(
         payload=payload,
         current_user=current_user,
         db=db,
+        offline_sync=offline_sync,
         audio_file=audio,
         image_files=images or [],
         ip_origen=request.client.host if request.client is not None else None,

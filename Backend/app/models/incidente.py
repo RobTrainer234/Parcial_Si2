@@ -67,6 +67,7 @@ class Incidente(TimestampMixin, Base):
     latitud: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
     longitud: Mapped[Decimal] = mapped_column(Numeric(11, 8), nullable=False)
     descripcion_cliente: Mapped[str] = mapped_column(Text, nullable=False)
+    local_uuid: Mapped[str | None] = mapped_column(String(64))
     estado: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
@@ -258,6 +259,13 @@ class SolicitudServicio(TimestampMixin, Base):
 Index("ix_incidente_cliente", Incidente.id_cliente)
 Index("ix_incidente_estado", Incidente.estado)
 Index("ix_incidente_especialidad_detectada", Incidente.id_especialidad_detectada)
+Index(
+    "ux_incidente_cliente_local_uuid",
+    Incidente.id_cliente,
+    Incidente.local_uuid,
+    unique=True,
+    postgresql_where=Incidente.local_uuid.is_not(None),
+)
 Index("ix_solicitud_taller_estado", SolicitudServicio.id_taller, SolicitudServicio.estado)
 Index(
     "ix_solicitud_incidente_estado",
@@ -276,4 +284,3 @@ Index(
     unique=True,
     postgresql_where=text("estado = 'ACEPTADA'"),
 )
-

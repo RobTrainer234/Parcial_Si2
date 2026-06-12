@@ -44,6 +44,8 @@ class TriageRepository {
     required double longitud,
     required String descripcionCliente,
     required int specialtyId,
+    String? localUuid,
+    bool offlineSync = false,
     List<XFile> images = const [],
     String? audioPath,
   }) async {
@@ -53,6 +55,9 @@ class TriageRepository {
       'longitud': longitud.toString(),
       'descripcion_cliente': descripcionCliente,
       'id_especialidad_reportada_cliente': specialtyId,
+      if (localUuid != null && localUuid.trim().isNotEmpty)
+        'local_uuid': localUuid.trim(),
+      if (offlineSync) 'offline_sync': 'true',
     });
 
     for (final image in images.take(5)) {

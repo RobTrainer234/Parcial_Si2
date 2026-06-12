@@ -9,12 +9,28 @@ import '../../../../core/widgets/app_page_scaffold.dart';
 import '../../../../core/widgets/app_primary_button.dart';
 import '../../../../core/widgets/app_theme_toggle_button.dart';
 import '../../../../core/widgets/app_user_mini_profile.dart';
+import '../../../inteligencia_triaje/presentation/controllers/offline_incident_queue_controller.dart';
 import '../../../seguridad_usuarios/data/models/profile_me_model.dart';
 import '../../../seguridad_usuarios/presentation/controllers/profile_controller.dart';
 import '../controllers/notifications_controller.dart';
 
-class ClientHomePage extends ConsumerWidget {
+class ClientHomePage extends ConsumerStatefulWidget {
   const ClientHomePage({super.key});
+
+  @override
+  ConsumerState<ClientHomePage> createState() => _ClientHomePageState();
+}
+
+class _ClientHomePageState extends ConsumerState<ClientHomePage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref
+          .read(offlineIncidentQueueControllerProvider.notifier)
+          .syncPending(silent: true);
+    });
+  }
 
   void _showMessage(BuildContext context, String message) {
     ScaffoldMessenger.of(
@@ -23,11 +39,12 @@ class ClientHomePage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dangerColor = theme.colorScheme.error;
     final profileState = ref.watch(profileControllerProvider);
     final unreadCountAsync = ref.watch(unreadNotificationsCountProvider);
+    final offlinePendingCount = ref.watch(offlinePendingIncidentCountProvider);
     final session = ref.watch(authControllerProvider).valueOrNull;
     final vehicleCount = profileState.valueOrNull?.vehicles.length ?? 0;
 
@@ -253,6 +270,17 @@ class ClientHomePage extends ConsumerWidget {
               orElse: () => null,
             ),
             onTap: () => context.push(AppRoutes.notifications),
+          ),
+          const SizedBox(height: 12),
+          _HomeActionCard(
+            title: 'Emergencias pendientes',
+            subtitle:
+                'Consulta reportes guardados sin conexion y fuerza su sincronizacion.',
+            icon: Icons.cloud_sync_outlined,
+            trailingText: offlinePendingCount > 0
+                ? '$offlinePendingCount'
+                : null,
+            onTap: () => context.push(AppRoutes.pendingIncidents),
           ),
           const SizedBox(height: 12),
           _HomeActionCard(

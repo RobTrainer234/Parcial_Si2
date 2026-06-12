@@ -11,6 +11,7 @@ class AppRoutes {
   static const activeServices = '/services/active';
   static const reportIncident = '/incident/report';
   static const incidentReported = '/incident/reported';
+  static const pendingIncidents = '/incident/pending';
 
   // Phase C: parameterized routes
   static String incidentDiagnosisPath(int incidentId) =>

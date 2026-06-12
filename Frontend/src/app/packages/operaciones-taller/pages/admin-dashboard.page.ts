@@ -11,6 +11,10 @@ import { MetricCardComponent } from '../../../shared/components/metric-card.comp
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
 import {
+  WebOfflineIncidentQueueEntry,
+  WebOfflineIncidentQueueService,
+} from '../../gestion-auxilio/data-access/web-offline-incident-queue.service';
+import {
   DashboardMonthlyRevenueItem,
   DashboardOverviewResponse,
   VoiceDashboardReportResponse,
@@ -249,6 +253,64 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
             </div>
           </app-card>
         </section>
+        <section class="section-grid">
+          <app-card
+            title="Cola offline web"
+            subtitle="Fallback minimo para PWA/admin. El flujo principal de incidentes offline vive en la app movil."
+          >
+            <div class="offline-queue">
+              <div class="history-card">
+                <div>
+                  <span class="history-card__label">Elementos pendientes o con error</span>
+                  <strong class="history-card__value">
+                    {{ webOfflinePendingCount() }}
+                  </strong>
+                </div>
+                <div class="offline-queue__actions">
+                  <button type="button" class="app-button app-button--secondary" (click)="addWebOfflineDemoEntry()">
+                    Guardar demo local
+                  </button>
+                  <button type="button" class="app-button app-button--secondary" (click)="simulateWebOfflineSync()">
+                    Simular sync
+                  </button>
+                  <button type="button" class="app-button app-button--ghost" (click)="simulateWebOfflineError()">
+                    Simular error
+                  </button>
+                </div>
+              </div>
+
+              @if (webOfflineEntries().length) {
+                <div class="list">
+                  @for (entry of webOfflineEntries(); track entry.local_uuid) {
+                    <article class="list__item">
+                      <div class="list__meta">
+                        <span class="badge" [class]="webOfflineBadgeClass(entry.status)">
+                          {{ entry.status }}
+                        </span>
+                        <strong>{{ entry.local_uuid }}</strong>
+                      </div>
+                      <p class="text-muted">{{ entry.description }}</p>
+                      <small class="text-muted">
+                        {{ formatDateTime(entry.created_at_local) }}
+                        @if (entry.server_incident_id) {
+                          · incidente #{{ entry.server_incident_id }}
+                        }
+                      </small>
+                      @if (entry.last_error) {
+                        <small class="feedback feedback--error">{{ entry.last_error }}</small>
+                      }
+                    </article>
+                  }
+                </div>
+              } @else {
+                <app-empty-state
+                  title="Sin elementos locales"
+                  message="No hay reportes de demostracion guardados en localStorage para la web admin."
+                />
+              }
+            </div>
+          </app-card>
+        </section>
       } @else {
         <app-empty-state
           title="Información no disponible"
@@ -389,6 +451,18 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         border: 1px solid color-mix(in srgb, #f59e0b 28%, var(--color-border));
       }
 
+      .offline-queue {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      .offline-queue__actions {
+        display: flex;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+      }
+
       .revenue-bars {
         display: flex;
         flex-direction: column;
@@ -438,6 +512,7 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
 })
 export class AdminDashboardPage {
   private readonly dashboardApi = inject(WorkshopDashboardApi);
+  private readonly webOfflineQueue = inject(WebOfflineIncidentQueueService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly loading = signal(false);
@@ -454,6 +529,10 @@ export class AdminDashboardPage {
 
   protected readonly actionItemsPreview = computed(() =>
     (this.overview()?.action_items ?? []).slice(0, 6),
+  );
+  protected readonly webOfflineEntries = computed(() => this.webOfflineQueue.entries());
+  protected readonly webOfflinePendingCount = computed(() =>
+    this.webOfflineQueue.pendingCount(),
   );
 
   constructor() {
@@ -569,6 +648,42 @@ export class AdminDashboardPage {
     }
 
     return Math.max(10, (currentValue / maxValue) * 100);
+  }
+
+  protected addWebOfflineDemoEntry(): void {
+    this.webOfflineQueue.addDemoEntry();
+  }
+
+  protected simulateWebOfflineSync(): void {
+    this.webOfflineQueue.simulateSync();
+  }
+
+  protected simulateWebOfflineError(): void {
+    this.webOfflineQueue.simulateError();
+  }
+
+  protected webOfflineBadgeClass(status: WebOfflineIncidentQueueEntry['status']): string {
+    switch (status) {
+      case 'SINCRONIZADO':
+        return 'badge badge--success';
+      case 'SINCRONIZANDO':
+        return 'badge badge--info';
+      case 'ERROR_SYNC':
+        return 'badge badge--danger';
+      default:
+        return 'badge badge--warning';
+    }
+  }
+
+  protected formatDateTime(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return 'Fecha local no disponible';
+    }
+    return new Intl.DateTimeFormat('es-BO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(parsed);
   }
 
   private asNumber(value: number | string | null | undefined): number {
