@@ -98,6 +98,11 @@ class NormalizedTriageAIResult(BaseModel):
         default=None,
         validation_alias=AliasChoices("audio_transcript", "transcripcion_audio"),
     )
+    audio_summary: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("audio_summary", "resumen_audio"),
+    )
+    audio_analysis_type: str = "NO_AUDIO"
     visual_evidence_tags: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("visual_evidence_tags", "etiquetas_imagen"),
@@ -145,6 +150,7 @@ class NormalizedTriageAIResult(BaseModel):
         "customer_recommendation",
         "operator_notes",
         "audio_transcript",
+        "audio_summary",
         "observations",
     )
     @classmethod
@@ -160,6 +166,19 @@ class NormalizedTriageAIResult(BaseModel):
         if value is not None:
             raise ValueError("Audio transcription is not supported in Groq triage.")
         return value
+
+    @field_validator("audio_analysis_type")
+    @classmethod
+    def normalize_audio_analysis_type(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        allowed = {
+            "NO_AUDIO",
+            "SPEECH_TRANSCRIPTION",
+            "MECHANICAL_SOUND_EXPERIMENTAL",
+        }
+        if normalized not in allowed:
+            raise ValueError("Invalid audio_analysis_type.")
+        return normalized
 
     @field_validator("visual_evidence_tags", mode="before")
     @classmethod
@@ -209,11 +228,20 @@ def _build_triage_prompt(
     reported_specialty_name: str,
     specialty_names: list[str],
     image_count: int,
+    audio_transcript: str | None,
+    audio_analysis_type: str,
+    audio_warning: str | None,
 ) -> str:
     allowed_specialties = ", ".join(specialty_names)
+    audio_context = (
+        f"Tipo de analisis de audio: {audio_analysis_type}. "
+        f"Transcripcion o nota de audio: {audio_transcript or 'Sin audio o sin transcripcion util.'}. "
+    )
+    if audio_warning:
+        audio_context += f"Advertencia de audio: {audio_warning}. "
     return (
         "Eres un clasificador tecnico preliminar para auxilio vehicular. "
-        "Analiza solamente la descripcion del cliente y las imagenes adjuntas. "
+        "Analiza la descripcion del cliente, la transcripcion de audio cuando exista y las imagenes adjuntas. "
         "No inventes hechos que no esten visibles o descritos. "
         "No sobreafirmes ni presentes certezas falsas. "
         "Cuando la evidencia no sea concluyente usa expresiones como posible, probable o se recomienda revisar. "
@@ -222,6 +250,7 @@ def _build_triage_prompt(
         f"Especialidades permitidas exactamente como catalogo backend: {allowed_specialties}. "
         f"Cantidad de imagenes adjuntas: {image_count}. "
         f"Descripcion del cliente: {description}. "
+        f"{audio_context}"
         "Reglas visuales: si una imagen muestra claramente una llanta baja, pinchada, rueda danada o neumatico sin aire, "
         "prefiere detected_specialty=\"Llantas\" cuando exista en el catalogo. "
         "Si muestra bateria, bornes, capot abierto o bahia de motor y la descripcion menciona que no prende, no avanza o se apago, "
@@ -234,16 +263,21 @@ def _build_triage_prompt(
         "No devuelvas una especialidad fuera del catalogo permitido. "
         "confidence debe ser un numero entre 0 y 100, no entre 0 y 1. "
         "Ejemplo: usa 90 para 90%, no 0.90. "
-        "audio_transcript debe ser siempre null porque el audio no se procesa. "
+        "Si el audio contiene voz clara, usa esa explicacion para complementar el analisis. "
+        "Si el audio es no verbal, mecanico o sin voz clara, no presentes el resultado como concluyente. "
+        "Cuando el audio sea no verbal o no haya transcripcion util, usa audio_analysis_type=\"MECHANICAL_SOUND_EXPERIMENTAL\" y baja la confianza. "
         "visual_evidence_tags debe ser un arreglo corto de etiquetas legibles. "
         "Si la descripcion o las imagenes son ambiguas, elige DIAGNOSTICO_GENERAL o MECANICA_GENERAL cuando exista en el catalogo y marca requires_manual_review=true. "
+        "Si el audio es la unica evidencia y no aporta voz clara, marca requires_manual_review=true. "
         "Si no estas seguro, conserva una especialidad permitida amplia, baja la confianza y explica la incertidumbre en summary u observations. "
         "Estructura JSON obligatoria: "
         '{"summary": string, "severity": "BAJA" | "MEDIA" | "ALTA", '
         '"detected_specialty": string | null, "confidence": number, '
         '"specific_diagnosis": string | null, "suggested_service": string | null, '
         '"customer_recommendation": string | null, "operator_notes": string | null, '
-        '"audio_transcript": null, "visual_evidence_tags": array de strings, '
+        '"audio_transcript": null, "audio_summary": string | null, '
+        '"audio_analysis_type": "SPEECH_TRANSCRIPTION" | "MECHANICAL_SOUND_EXPERIMENTAL" | "NO_AUDIO", '
+        '"visual_evidence_tags": array de strings, '
         '"suggested_tools": array de strings, "requires_tow": boolean, '
         '"observations": string | null, "requires_manual_review": boolean}.'
     )
@@ -430,6 +464,9 @@ def run_multimodal_triage(
     specialty_names: list[str],
     images: list[AIMediaInput],
     audio: AIMediaInput | None,
+    audio_transcript: str | None,
+    audio_analysis_type: str,
+    audio_warning: str | None = None,
 ) -> tuple[NormalizedTriageAIResult, dict[str, Any]]:
     settings = get_settings()
     provider_name, model_name, api_key = _get_triage_provider_settings()
@@ -446,13 +483,16 @@ def run_multimodal_triage(
         reported_specialty_name=reported_specialty_name,
         specialty_names=specialty_names,
         image_count=len(images_for_provider),
+        audio_transcript=audio_transcript,
+        audio_analysis_type=audio_analysis_type,
+        audio_warning=audio_warning,
     )
 
     provider_metadata: dict[str, Any] = {
         "provider": provider_name,
         "model": model_name,
         "vision_enabled": vision_enabled,
-        "audio_included": False,
+        "audio_included": bool(audio_transcript or audio_warning),
         "image_count": len(images_for_provider),
         "image_count_received_by_backend": len(images),
         "image_count_sent_to_ai": len(images_for_provider),
@@ -463,9 +503,11 @@ def run_multimodal_triage(
     if images and not images_for_provider:
         provider_metadata["image_omitted_reason"] = "triage_model_without_vision_support"
     if audio is not None:
-        provider_metadata["audio_omitted_reason"] = (
-            "audio_not_supported_in_current_groq_triage"
-        )
+        provider_metadata["audio_analysis_type"] = audio_analysis_type
+        provider_metadata["audio_warning"] = audio_warning
+        provider_metadata["audio_transcript_available"] = bool(audio_transcript)
+        if not audio_transcript and audio_warning:
+            provider_metadata["audio_omitted_reason"] = "no_useful_audio_transcription"
 
     provider_response = _call_groq_chat_completion(
         provider_name=provider_name,

@@ -17,10 +17,7 @@ import '../controllers/operator_service_detail_controller.dart';
 import '../widgets/operator_navigation_map.dart';
 
 class OperatorServiceDetailPage extends ConsumerStatefulWidget {
-  const OperatorServiceDetailPage({
-    super.key,
-    required this.serviceId,
-  });
+  const OperatorServiceDetailPage({super.key, required this.serviceId});
 
   final int serviceId;
 
@@ -36,9 +33,7 @@ class _OperatorServiceDetailPageState
   bool _isAcknowledgingProfile = false;
   bool _isOpeningMaps = false;
 
-  Future<void> _runMainAction(
-    OperatorServiceDetailViewModel viewModel,
-  ) async {
+  Future<void> _runMainAction(OperatorServiceDetailViewModel viewModel) async {
     final currentState = viewModel.detail.serviceState;
     setState(() {
       _isSubmitting = true;
@@ -54,8 +49,9 @@ class _OperatorServiceDetailPageState
               .startNavigation(
                 latitud: position.latitude,
                 longitud: position.longitude,
-                accuracyMeters:
-                    position.accuracy >= 0 ? position.accuracy : null,
+                accuracyMeters: position.accuracy >= 0
+                    ? position.accuracy
+                    : null,
                 speedMps: position.speed >= 0 ? position.speed : null,
               );
           break;
@@ -66,8 +62,9 @@ class _OperatorServiceDetailPageState
               .updateLocation(
                 latitud: position.latitude,
                 longitud: position.longitude,
-                accuracyMeters:
-                    position.accuracy >= 0 ? position.accuracy : null,
+                accuracyMeters: position.accuracy >= 0
+                    ? position.accuracy
+                    : null,
                 heading: position.heading >= 0 ? position.heading : null,
                 speedMps: position.speed >= 0 ? position.speed : null,
                 deviceTimestamp: DateTime.now().toUtc(),
@@ -112,8 +109,8 @@ class _OperatorServiceDetailPageState
         localizedMessage.isNotEmpty && localizedMessage != response.message
             ? localizedMessage
             : currentState == 'EN_REPARACION'
-                ? 'Atencion finalizada. Esperando confirmacion del cliente.'
-                : 'Servicio actualizado correctamente.',
+            ? 'Atencion finalizada. Esperando confirmacion del cliente.'
+            : 'Servicio actualizado correctamente.',
       );
     } catch (error) {
       _showSnack(_mapOperatorActionError(error));
@@ -239,9 +236,9 @@ class _OperatorServiceDetailPageState
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -281,15 +278,18 @@ class _OperatorServiceDetailPageState
           final needsProfileAcknowledgement =
               detail.serviceState == 'ASIGNADO' &&
               progress != null &&
-              !(navigation?.profileAcknowledged ?? progress.profileAcknowledged);
-          final incidentLatitud = navigation?.destinationLatitud ?? detail.latitud;
+              !(navigation?.profileAcknowledged ??
+                  progress.profileAcknowledged);
+          final incidentLatitud =
+              navigation?.destinationLatitud ?? detail.latitud;
           final incidentLongitud =
               navigation?.destinationLongitud ?? detail.longitud;
           final operarioLatitud = navigation?.lastKnownLatitud;
           final operarioLongitud = navigation?.lastKnownLongitud;
           final lastLocationAt = navigation?.lastKnownAt;
-          final isClosedOperationally =
-              _isClosedOperationalState(detail.serviceState);
+          final isClosedOperationally = _isClosedOperationalState(
+            detail.serviceState,
+          );
 
           return RefreshIndicator(
             onRefresh: () => ref
@@ -315,21 +315,20 @@ class _OperatorServiceDetailPageState
                         value: localizeStatusLabel(detail.incidentState),
                       ),
                       if (detail.workshopName != null)
-                        _InfoRow(
-                          label: 'Taller',
-                          value: detail.workshopName!,
-                        ),
+                        _InfoRow(label: 'Taller', value: detail.workshopName!),
                       if (detail.clientReportedSpecialty != null)
                         _InfoRow(
                           label: 'Especialidad reportada',
-                          value:
-                              localizeSpecialtyLabel(detail.clientReportedSpecialty),
+                          value: localizeSpecialtyLabel(
+                            detail.clientReportedSpecialty,
+                          ),
                         ),
                       if (detail.detectedSpecialty != null)
                         _InfoRow(
                           label: 'Especialidad detectada',
-                          value:
-                              localizeSpecialtyLabel(detail.detectedSpecialty),
+                          value: localizeSpecialtyLabel(
+                            detail.detectedSpecialty,
+                          ),
                         ),
                       if (detail.severity != null)
                         _InfoRow(
@@ -343,10 +342,7 @@ class _OperatorServiceDetailPageState
                         ),
                       if (detail.aiSummary != null &&
                           detail.aiSummary!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Resumen IA',
-                          value: detail.aiSummary!,
-                        ),
+                        _InfoRow(label: 'Resumen IA', value: detail.aiSummary!),
                       if (detail.specificDiagnosis != null &&
                           detail.specificDiagnosis!.trim().isNotEmpty)
                         _InfoRow(
@@ -370,6 +366,18 @@ class _OperatorServiceDetailPageState
                         _InfoRow(
                           label: 'Notas para el operario',
                           value: detail.operatorNotes!,
+                        ),
+                      if (detail.audioTranscript != null &&
+                          detail.audioTranscript!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Transcripción de audio',
+                          value: detail.audioTranscript!,
+                        ),
+                      if (detail.audioSummary != null &&
+                          detail.audioSummary!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Resumen de audio',
+                          value: detail.audioSummary!,
                         ),
                       _InfoRow(
                         label: 'Ubicacion del cliente',
@@ -416,27 +424,73 @@ class _OperatorServiceDetailPageState
                         value:
                             '${detail.evidenceSummary.images} imagen(es), ${detail.evidenceSummary.audio} audio(s)',
                       ),
+                      if (detail.audioAnalysisType ==
+                          'MECHANICAL_SOUND_EXPERIMENTAL')
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Text(
+                            'El audio del cliente no contiene voz clara. El análisis por sonido mecánico es experimental.',
+                          ),
+                        ),
                       if (detail.requiresManualReview)
                         const Padding(
                           padding: EdgeInsets.only(top: 8),
                           child: Text(
-                            'La IA no tiene certeza completa. El taller realizará diagnóstico físico.',
+                            'La IA no tuvo suficiente confianza. Registra diagnóstico manual antes de continuar.',
                           ),
                         ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
-                  OperatorNavigationMap(
-                    incidentLatitud: incidentLatitud,
-                    incidentLongitud: incidentLongitud,
-                    operarioLatitud: operarioLatitud,
-                    operarioLongitud: operarioLongitud,
-                    lastLocationAt: lastLocationAt,
-                    routePoints: navigation?.routePoints,
-                    routeDistanceMeters: navigation?.routeDistanceMeters,
-                    routeDurationSeconds: navigation?.routeDurationSeconds,
+                AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Evidencia del cliente',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      if (detail.aiSummary != null &&
+                          detail.aiSummary!.trim().isNotEmpty)
+                        _InfoRow(label: 'Resumen IA', value: detail.aiSummary!),
+                      _InfoRow(
+                        label: 'Transcripción de audio',
+                        value: detail.audioTranscript?.trim().isNotEmpty == true
+                            ? detail.audioTranscript!
+                            : 'No se adjuntó audio.',
+                      ),
+                      if (detail.audioSummary != null &&
+                          detail.audioSummary!.trim().isNotEmpty)
+                        _InfoRow(
+                          label: 'Resumen de audio',
+                          value: detail.audioSummary!,
+                        ),
+                      _InfoRow(
+                        label: 'Confianza IA',
+                        value: detail.confidence != null
+                            ? '${detail.confidence!.toStringAsFixed(0)}%'
+                            : 'Sin dato',
+                      ),
+                      _InfoRow(
+                        label: 'Revisión manual',
+                        value: detail.requiresManualReview ? 'Requerida' : 'No',
+                      ),
+                    ],
                   ),
+                ),
+                const SizedBox(height: 16),
+                OperatorNavigationMap(
+                  incidentLatitud: incidentLatitud,
+                  incidentLongitud: incidentLongitud,
+                  operarioLatitud: operarioLatitud,
+                  operarioLongitud: operarioLongitud,
+                  lastLocationAt: lastLocationAt,
+                  routePoints: navigation?.routePoints,
+                  routeDistanceMeters: navigation?.routeDistanceMeters,
+                  routeDurationSeconds: navigation?.routeDurationSeconds,
+                ),
                 const SizedBox(height: 16),
                 AppCard(
                   child: Column(
@@ -490,13 +544,14 @@ class _OperatorServiceDetailPageState
                             ),
                           ),
                           OutlinedButton(
-                            onPressed: incidentLatitud != null &&
+                            onPressed:
+                                incidentLatitud != null &&
                                     incidentLongitud != null &&
                                     !_isOpeningMaps
                                 ? () => _openRouteInMaps(
-                                      incidentLatitud,
-                                      incidentLongitud,
-                                    )
+                                    incidentLatitud,
+                                    incidentLongitud,
+                                  )
                                 : null,
                             child: Text(
                               _isOpeningMaps
@@ -528,13 +583,11 @@ class _OperatorServiceDetailPageState
                               children: [
                                 Text(
                                   _formatDate(item.timestamp),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
+                                  style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                 ),
                                 const SizedBox(height: 4),
@@ -567,8 +620,9 @@ class _OperatorServiceDetailPageState
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton(
-                            onPressed:
-                                _isAcknowledgingProfile ? null : _acknowledgeProfile,
+                            onPressed: _isAcknowledgingProfile
+                                ? null
+                                : _acknowledgeProfile,
                             child: Text(
                               _isAcknowledgingProfile
                                   ? 'Guardando revision...'
@@ -582,9 +636,7 @@ class _OperatorServiceDetailPageState
                 if (needsProfileAcknowledgement) const SizedBox(height: 16),
                 if (isClosedOperationally)
                   const AppCard(
-                    child: Text(
-                      'El servicio ya fue cerrado operativamente.',
-                    ),
+                    child: Text('El servicio ya fue cerrado operativamente.'),
                   ),
                 if (isClosedOperationally) const SizedBox(height: 16),
                 if (nextActionLabel != null)
@@ -626,7 +678,8 @@ class _RepairCompletionDialog extends StatefulWidget {
   const _RepairCompletionDialog();
 
   @override
-  State<_RepairCompletionDialog> createState() => _RepairCompletionDialogState();
+  State<_RepairCompletionDialog> createState() =>
+      _RepairCompletionDialogState();
 }
 
 class _RepairCompletionDialogState extends State<_RepairCompletionDialog> {
@@ -694,9 +747,7 @@ class _ClosedServiceView extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Puede haber sido completado, pagado o cerrado.',
-              ),
+              const Text('Puede haber sido completado, pagado o cerrado.'),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -919,10 +970,7 @@ class _OpenMapsException implements Exception {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   final String label;
   final String value;

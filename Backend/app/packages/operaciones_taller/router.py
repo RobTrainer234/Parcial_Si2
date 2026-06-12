@@ -34,6 +34,7 @@ from .schemas import (
     WorkshopCatalogServiceResponse,
     WorkshopCatalogServiceUpdateRequest,
     WorkshopDashboardOverviewResponse,
+    VoiceDashboardReportResponse,
     WorkshopRequestDecisionRequest,
     WorkshopRequestDecisionResponse,
     WorkshopRequestDetailResponse,
@@ -53,6 +54,7 @@ from .service import (
     activate_workshop_catalog_service,
     assign_operario_to_service,
     create_workshop_catalog_service,
+    create_workshop_dashboard_voice_report,
     decide_workshop_request,
     deactivate_workshop_catalog_service,
     get_workshop_dashboard_overview,
@@ -92,6 +94,25 @@ def workshop_dashboard_overview(
         db=db,
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@router.post("/dashboard/ai-reports/audio", response_model=VoiceDashboardReportResponse)
+def workshop_dashboard_voice_report(
+    audio: UploadFile = File(...),
+    date_from: datetime | None = Form(default=None),
+    date_to: datetime | None = Form(default=None),
+    scope: str | None = Form(default="TALLER"),
+    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> VoiceDashboardReportResponse:
+    return create_workshop_dashboard_voice_report(
+        admin_context=admin_context,
+        db=db,
+        audio_file=audio,
+        date_from=date_from,
+        date_to=date_to,
+        scope=scope,
     )
 
 

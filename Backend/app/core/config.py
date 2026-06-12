@@ -62,8 +62,15 @@ class Settings:
     triage_ai_provider: str
     triage_ai_api_key: str | None
     triage_ai_model: str
+    voice_ai_provider: str
+    voice_ai_api_key: str | None
+    voice_ai_model: str
+    report_ai_provider: str
+    report_ai_api_key: str | None
+    report_ai_model: str
     triage_auto_run_after_report: bool
     triage_min_confidence: int
+    manual_review_confidence_threshold: int
     triage_ai_timeout_seconds: int
     matchmaking_request_ttl_seconds: int
     workshop_max_action_radius_km: int
@@ -123,11 +130,23 @@ def get_settings() -> Settings:
             "TRIAGE_AI_MODEL",
             "meta-llama/llama-4-scout-17b-16e-instruct",
         ),
+        voice_ai_provider=os.getenv("VOICE_AI_PROVIDER", "groq"),
+        voice_ai_api_key=os.getenv("VOICE_AI_API_KEY") or os.getenv("TRIAGE_AI_API_KEY"),
+        voice_ai_model=os.getenv("VOICE_AI_MODEL", "whisper-large-v3-turbo"),
+        report_ai_provider=os.getenv("REPORT_AI_PROVIDER", "groq"),
+        report_ai_api_key=os.getenv("REPORT_AI_API_KEY") or os.getenv("TRIAGE_AI_API_KEY"),
+        report_ai_model=os.getenv(
+            "REPORT_AI_MODEL",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+        ),
         triage_auto_run_after_report=_get_bool_env(
             "TRIAGE_AUTO_RUN_AFTER_REPORT",
             default=False,
         ),
         triage_min_confidence=int(os.getenv("TRIAGE_MIN_CONFIDENCE", "60")),
+        manual_review_confidence_threshold=int(
+            os.getenv("MANUAL_REVIEW_CONFIDENCE_THRESHOLD", "50")
+        ),
         triage_ai_timeout_seconds=int(os.getenv("TRIAGE_AI_TIMEOUT_SECONDS", "30")),
         matchmaking_request_ttl_seconds=int(
             os.getenv("MATCHMAKING_REQUEST_TTL_SECONDS", "120")

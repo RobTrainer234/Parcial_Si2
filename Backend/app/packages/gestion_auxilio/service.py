@@ -1248,6 +1248,8 @@ def _build_diagnosis_summary(incident: Incidente) -> IncidentDiagnosisSummaryRes
         customer_recommendation=triage_details.customer_recommendation,
         operator_notes=triage_details.operator_notes,
         visual_evidence_tags=triage_details.visual_evidence_tags,
+        audio_summary=triage_details.audio_summary,
+        audio_analysis_type=triage_details.audio_analysis_type,
         transcripcion_audio=incident.transcripcion_audio,
         etiquetas_imagen=incident.etiquetas_imagen,
         requires_manual_review=incident.requiere_revision_manual,

@@ -22,6 +22,22 @@ class SpecialtySummaryResponse(BaseModel):
     nombre: str
 
 
+class WorkshopIncidentEvidenceResponse(BaseModel):
+    id_evidencia: int
+    tipo_evidencia: str
+    categoria: str
+    url_archivo: str
+    mime_type: str | None = None
+    tamano_bytes: int | None = None
+    fecha_registro: datetime
+
+
+class WorkshopIncidentEvidenceSummaryResponse(BaseModel):
+    total: int
+    imagenes: int
+    audio: int
+
+
 class WorkshopRequestSummary(BaseModel):
     request_id: int
     incident_id: int
@@ -31,6 +47,8 @@ class WorkshopRequestSummary(BaseModel):
     distance_km: Decimal
     detected_specialty: SpecialtySummaryResponse | None = None
     severity: str | None = None
+    confidence: Decimal | None = None
+    requires_manual_review: bool = False
     ai_summary: str | None = None
     used_insurance_priority: bool
     attempt_number: int
@@ -58,14 +76,20 @@ class WorkshopRequestDetailResponse(BaseModel):
     client_reported_specialty: SpecialtySummaryResponse | None = None
     detected_specialty: SpecialtySummaryResponse | None = None
     severity: str | None = None
+    confidence: Decimal | None = None
+    requires_manual_review: bool = False
     ai_summary: str | None = None
     specific_diagnosis: str | None = None
     suggested_service: str | None = None
     customer_recommendation: str | None = None
     operator_notes: str | None = None
     visual_evidence_tags: list[str] = Field(default_factory=list)
+    audio_summary: str | None = None
+    audio_analysis_type: str = "NO_AUDIO"
     transcripcion_audio: str | None = None
     image_labels: list[str] | dict[str, object] | None = None
+    evidence_summary: WorkshopIncidentEvidenceSummaryResponse
+    evidences: list[WorkshopIncidentEvidenceResponse] = Field(default_factory=list)
     service_id: int | None = None
     service_state: str | None = None
     prequotation_code: str | None = None
@@ -592,6 +616,28 @@ class WorkshopDashboardOverviewResponse(BaseModel):
     operarios: WorkshopDashboardOperarioResponse
     reputation: WorkshopDashboardReputationResponse
     action_items: list[WorkshopDashboardActionItem]
+
+
+class VoiceDashboardIntentResponse(BaseModel):
+    intent: str
+    focus: str | None = None
+    metric: str | None = None
+    requested_period: str | None = None
+
+
+class VoiceDashboardFiltersResponse(BaseModel):
+    scope: str
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+
+
+class VoiceDashboardReportResponse(BaseModel):
+    transcription: str | None = None
+    interpreted_intent: VoiceDashboardIntentResponse
+    generated_report: str
+    used_filters: VoiceDashboardFiltersResponse
+    data_available: bool
+    warnings: list[str] = Field(default_factory=list)
 
 
 WorkshopDashboardOperationsResponse.model_rebuild()

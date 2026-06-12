@@ -63,3 +63,25 @@ export interface DashboardOverviewResponse {
   reputation: Record<string, unknown>;
   action_items: DashboardActionItem[];
 }
+
+export interface VoiceDashboardIntentResponse {
+  intent: string;
+  focus?: string | null;
+  metric?: string | null;
+  requested_period?: string | null;
+}
+
+export interface VoiceDashboardFiltersResponse {
+  scope: string;
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+export interface VoiceDashboardReportResponse {
+  transcription?: string | null;
+  interpreted_intent: VoiceDashboardIntentResponse;
+  generated_report: string;
+  used_filters: VoiceDashboardFiltersResponse;
+  data_available: boolean;
+  warnings: string[];
+}

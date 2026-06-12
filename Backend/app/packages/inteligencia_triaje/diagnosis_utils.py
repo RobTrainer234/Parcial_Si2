@@ -6,8 +6,11 @@ from typing import Any, Mapping
 import unicodedata
 
 
-MANUAL_REVIEW_CONFIDENCE_FLOOR = 70
+MANUAL_REVIEW_CONFIDENCE_FLOOR = 50
 GENERAL_DIAGNOSIS_SPECIALTY = "DIAGNOSTICO GENERAL"
+NO_AUDIO_ANALYSIS = "NO_AUDIO"
+SPEECH_TRANSCRIPTION_ANALYSIS = "SPEECH_TRANSCRIPTION"
+MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS = "MECHANICAL_SOUND_EXPERIMENTAL"
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,8 @@ class TriageDiagnosisDetails:
     customer_recommendation: str | None
     operator_notes: str | None
     visual_evidence_tags: list[str]
+    audio_summary: str | None
+    audio_analysis_type: str
     requires_manual_review: bool
     summary: str | None
     manual_review_reasons: list[str]
@@ -209,7 +214,10 @@ def build_triage_details_from_ai_result(
     visual_evidence_tags: Any,
     provider_requires_manual_review: bool | None,
     min_confidence: int,
+    manual_review_confidence_threshold: int,
     image_count: int,
+    audio_summary: str | None,
+    audio_analysis_type: str | None,
     specialty_override_reason: str | None = None,
     suppress_manual_review_reasons: set[str] | None = None,
 ) -> TriageDiagnosisDetails:
@@ -230,9 +238,14 @@ def build_triage_details_from_ai_result(
     )
 
     manual_review_reasons: list[str] = []
-    manual_review_threshold = max(min_confidence, MANUAL_REVIEW_CONFIDENCE_FLOOR)
+    manual_review_threshold = max(
+        manual_review_confidence_threshold,
+        MANUAL_REVIEW_CONFIDENCE_FLOOR,
+    )
     normalized_detected_specialty = normalize_catalog_name(detected_specialty_name)
     normalized_raw_specialty = normalize_catalog_name(raw_detected_specialty_name)
+    resolved_audio_summary = _normalize_text(audio_summary)
+    resolved_audio_analysis_type = _normalize_audio_analysis_type(audio_analysis_type)
 
     if detected_specialty_name is None:
         manual_review_reasons.append("specialty_not_mapped")
@@ -257,6 +270,12 @@ def build_triage_details_from_ai_result(
         normalized_detected_specialty=normalized_detected_specialty,
     ):
         manual_review_reasons.append("inconsistent_response")
+    if (
+        resolved_audio_analysis_type == MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS
+        and image_count <= 0
+        and _is_description_too_vague(description)
+    ):
+        manual_review_reasons.append("experimental_audio_without_supporting_evidence")
 
     if suppress_manual_review_reasons:
         manual_review_reasons = [
@@ -277,6 +296,8 @@ def build_triage_details_from_ai_result(
         customer_recommendation=resolved_customer_recommendation,
         operator_notes=resolved_operator_notes,
         visual_evidence_tags=normalized_tags,
+        audio_summary=resolved_audio_summary,
+        audio_analysis_type=resolved_audio_analysis_type,
         requires_manual_review=bool(manual_review_reasons),
         summary=resolved_summary,
         manual_review_reasons=manual_review_reasons,
@@ -329,6 +350,13 @@ def build_triage_details_from_payload(
         safe_payload.get("manual_review_reasons")
     )
     payload_requires_manual_review = bool(safe_payload.get("requires_manual_review"))
+    resolved_audio_summary = _normalize_text(
+        safe_payload.get("audio_summary")
+        or safe_payload.get("resumen_audio")
+    )
+    resolved_audio_analysis_type = _normalize_audio_analysis_type(
+        safe_payload.get("audio_analysis_type")
+    )
 
     return TriageDiagnosisDetails(
         detected_specialty=resolved_detected_specialty,
@@ -349,6 +377,8 @@ def build_triage_details_from_payload(
         customer_recommendation=resolved_customer_recommendation,
         operator_notes=resolved_operator_notes,
         visual_evidence_tags=visual_evidence_tags,
+        audio_summary=resolved_audio_summary,
+        audio_analysis_type=resolved_audio_analysis_type,
         requires_manual_review=requires_manual_review or payload_requires_manual_review,
         summary=resolved_summary,
         manual_review_reasons=manual_review_reasons,
@@ -380,6 +410,8 @@ def build_triage_payload(
         "mapped_detected_specialty": details.mapped_detected_specialty,
         "specialty_override_reason": details.specialty_override_reason,
         "visual_evidence_tags": details.visual_evidence_tags,
+        "audio_summary": details.audio_summary,
+        "audio_analysis_type": details.audio_analysis_type,
     }
     payload.update(
         {
@@ -397,6 +429,9 @@ def build_triage_payload(
             "operator_notes": details.operator_notes,
             "visual_evidence_tags": details.visual_evidence_tags,
             "etiquetas_imagen": details.visual_evidence_tags or None,
+            "audio_summary": details.audio_summary,
+            "resumen_audio": details.audio_summary,
+            "audio_analysis_type": details.audio_analysis_type,
             "requires_manual_review": details.requires_manual_review,
             "manual_review_reasons": details.manual_review_reasons,
             "manual_review_reason": (
@@ -425,8 +460,8 @@ def build_triage_payload(
             "specialty_override_reason": details.specialty_override_reason,
             "specialty_detected_mapped": details.detected_specialty,
             "triage_min_confidence": min_confidence,
-            "manual_review_confidence_threshold": max(
-                min_confidence,
+            "manual_review_confidence_threshold": provider_metadata.get(
+                "manual_review_confidence_threshold",
                 MANUAL_REVIEW_CONFIDENCE_FLOOR,
             ),
         }
@@ -468,6 +503,19 @@ def _get_fallback_for_specialty(value: Any) -> TriageFallbackContent:
     if normalized is None:
         return _DEFAULT_FALLBACK
     return _FALLBACK_BY_SPECIALTY.get(normalized, _DEFAULT_FALLBACK)
+
+
+def _normalize_audio_analysis_type(value: Any) -> str:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return NO_AUDIO_ANALYSIS
+    if normalized in {
+        SPEECH_TRANSCRIPTION_ANALYSIS,
+        MECHANICAL_SOUND_EXPERIMENTAL_ANALYSIS,
+        NO_AUDIO_ANALYSIS,
+    }:
+        return normalized
+    return NO_AUDIO_ANALYSIS
 
 
 def _is_description_too_vague(description: str) -> bool:

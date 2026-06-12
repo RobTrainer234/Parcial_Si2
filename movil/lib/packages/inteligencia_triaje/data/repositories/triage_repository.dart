@@ -45,6 +45,7 @@ class TriageRepository {
     required String descripcionCliente,
     required int specialtyId,
     List<XFile> images = const [],
+    String? audioPath,
   }) async {
     final formData = FormData.fromMap({
       'id_vehiculo': vehicleId,
@@ -63,6 +64,18 @@ class TriageRepository {
             bytes,
             filename: image.name,
             contentType: _imageContentType(image),
+          ),
+        ),
+      );
+    }
+    if (audioPath != null && audioPath.trim().isNotEmpty) {
+      formData.files.add(
+        MapEntry(
+          'audio',
+          await MultipartFile.fromFile(
+            audioPath,
+            filename: _fileNameFromPath(audioPath),
+            contentType: _mediaTypeFromPath(audioPath),
           ),
         ),
       );
@@ -145,4 +158,14 @@ DioMediaType? _imageContentType(XFile image) {
     }
   }
   return MultipartFile.lookupMediaType(image.name);
+}
+
+String _fileNameFromPath(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final segments = normalized.split('/');
+  return segments.isEmpty ? 'audio.m4a' : segments.last;
+}
+
+DioMediaType? _mediaTypeFromPath(String path) {
+  return MultipartFile.lookupMediaType(_fileNameFromPath(path));
 }
