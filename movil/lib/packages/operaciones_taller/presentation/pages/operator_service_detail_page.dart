@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -17,7 +20,10 @@ import '../controllers/operator_service_detail_controller.dart';
 import '../widgets/operator_navigation_map.dart';
 
 class OperatorServiceDetailPage extends ConsumerStatefulWidget {
-  const OperatorServiceDetailPage({super.key, required this.serviceId});
+  const OperatorServiceDetailPage({
+    super.key,
+    required this.serviceId,
+  });
 
   final int serviceId;
 
@@ -28,12 +34,36 @@ class OperatorServiceDetailPage extends ConsumerStatefulWidget {
 
 class _OperatorServiceDetailPageState
     extends ConsumerState<OperatorServiceDetailPage> {
+  Timer? _refreshTimer;
   bool _isSubmitting = false;
   bool _isSendingLocation = false;
   bool _isAcknowledgingProfile = false;
   bool _isOpeningMaps = false;
+  bool _showServiceInfo = true;
+  bool _showDiagnosis = false;
+  bool _showTimeline = true;
+  String? _previousState;
 
-  Future<void> _runMainAction(OperatorServiceDetailViewModel viewModel) async {
+  @override
+  void initState() {
+    super.initState();
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (!mounted) return;
+      ref
+          .read(operatorServiceDetailProvider(widget.serviceId).notifier)
+          .refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _runMainAction(
+    OperatorServiceDetailViewModel viewModel,
+  ) async {
     final currentState = viewModel.detail.serviceState;
     setState(() {
       _isSubmitting = true;
@@ -49,9 +79,8 @@ class _OperatorServiceDetailPageState
               .startNavigation(
                 latitud: position.latitude,
                 longitud: position.longitude,
-                accuracyMeters: position.accuracy >= 0
-                    ? position.accuracy
-                    : null,
+                accuracyMeters:
+                    position.accuracy >= 0 ? position.accuracy : null,
                 speedMps: position.speed >= 0 ? position.speed : null,
               );
           break;
@@ -62,9 +91,8 @@ class _OperatorServiceDetailPageState
               .updateLocation(
                 latitud: position.latitude,
                 longitud: position.longitude,
-                accuracyMeters: position.accuracy >= 0
-                    ? position.accuracy
-                    : null,
+                accuracyMeters:
+                    position.accuracy >= 0 ? position.accuracy : null,
                 heading: position.heading >= 0 ? position.heading : null,
                 speedMps: position.speed >= 0 ? position.speed : null,
                 deviceTimestamp: DateTime.now().toUtc(),
@@ -109,8 +137,8 @@ class _OperatorServiceDetailPageState
         localizedMessage.isNotEmpty && localizedMessage != response.message
             ? localizedMessage
             : currentState == 'EN_REPARACION'
-            ? 'Atencion finalizada. Esperando confirmacion del cliente.'
-            : 'Servicio actualizado correctamente.',
+                ? 'Atencion finalizada. Esperando confirmacion del cliente.'
+                : 'Servicio actualizado correctamente.',
       );
     } catch (error) {
       _showSnack(_mapOperatorActionError(error));
@@ -236,19 +264,53 @@ class _OperatorServiceDetailPageState
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Color _stateColor(String? state) {
+    switch (state) {
+      case 'ASIGNADO':
+        return Colors.blue;
+      case 'EN_CAMINO':
+        return Colors.indigo;
+      case 'EN_SITIO':
+        return Colors.green;
+      case 'EN_DIAGNOSTICO_FISICO':
+      case 'EN_REPARACION':
+        return Colors.deepPurple;
+      case 'COMPLETADO_PENDIENTE_CONFIRMACION':
+        return Colors.teal;
+      case 'FINALIZADO_PENDIENTE_PAGO':
+        return Colors.amber.shade700;
+      case 'PAGADO':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final state = ref.watch(operatorServiceDetailProvider(widget.serviceId));
 
     return AppPageScaffold(
       label: 'OPERARIO',
       title: 'Detalle del servicio',
-      subtitle: 'Revisa el diagnostico y avanza la asistencia asignada.',
+      subtitle: 'Gestiona la asistencia asignada.',
+      leading: IconButton(
+        tooltip: 'Volver',
+        onPressed: () {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            context.go(AppRoutes.operatorHome);
+          }
+        },
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
       actions: IconButton(
         tooltip: 'Actualizar',
         onPressed: () => ref
@@ -256,6 +318,7 @@ class _OperatorServiceDetailPageState
             .refresh(),
         icon: const Icon(Icons.refresh_rounded),
       ),
+      padding: EdgeInsets.zero,
       child: state.when(
         loading: () => const AppLoading(message: 'Cargando servicio...'),
         error: (error, _) {
@@ -273,13 +336,14 @@ class _OperatorServiceDetailPageState
           final detail = viewModel.detail;
           final progress = viewModel.progress;
           final navigation = viewModel.navigationStatus;
+          final arrived = navigation?.hasArrived ?? false;
           final canSendLocation = _canSendLocation(detail.serviceState);
           final nextActionLabel = _nextActionLabel(detail.serviceState);
           final needsProfileAcknowledgement =
               detail.serviceState == 'ASIGNADO' &&
-              progress != null &&
-              !(navigation?.profileAcknowledged ??
-                  progress.profileAcknowledged);
+                  progress != null &&
+                  !(navigation?.profileAcknowledged ??
+                      progress.profileAcknowledged);
           final incidentLatitud =
               navigation?.destinationLatitud ?? detail.latitud;
           final incidentLongitud =
@@ -287,9 +351,15 @@ class _OperatorServiceDetailPageState
           final operarioLatitud = navigation?.lastKnownLatitud;
           final operarioLongitud = navigation?.lastKnownLongitud;
           final lastLocationAt = navigation?.lastKnownAt;
-          final isClosedOperationally = _isClosedOperationalState(
-            detail.serviceState,
-          );
+          final isClosedOperationally =
+              _isClosedOperationalState(detail.serviceState);
+
+          final currentState = detail.serviceState;
+          if (currentState != _previousState && _previousState != null) {
+            HapticFeedback.mediumImpact();
+            SystemSound.play(SystemSoundType.alert);
+          }
+          _previousState = currentState;
 
           return RefreshIndicator(
             onRefresh: () => ref
@@ -297,378 +367,974 @@ class _OperatorServiceDetailPageState
                 .refresh(),
             child: ListView(
               children: [
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                SizedBox(
+                  height: 380,
+                  child: Stack(
                     children: [
-                      Text(
-                        'Servicio de auxilio',
-                        style: Theme.of(context).textTheme.titleMedium,
+                      OperatorNavigationMap(
+                        incidentLatitud: incidentLatitud,
+                        incidentLongitud: incidentLongitud,
+                        operarioLatitud: operarioLatitud,
+                        operarioLongitud: operarioLongitud,
+                        lastLocationAt: lastLocationAt,
+                        routePoints: navigation?.routePoints,
+                        routeDistanceMeters: navigation?.routeDistanceMeters,
+                        routeDurationSeconds: navigation?.routeDurationSeconds,
+                        hasArrived: arrived,
                       ),
-                      const SizedBox(height: 12),
-                      _InfoRow(
-                        label: 'Estado del servicio',
-                        value: _friendlyOperatorState(detail.serviceState),
-                      ),
-                      _InfoRow(
-                        label: 'Estado del incidente',
-                        value: localizeStatusLabel(detail.incidentState),
-                      ),
-                      if (detail.workshopName != null)
-                        _InfoRow(label: 'Taller', value: detail.workshopName!),
-                      if (detail.clientReportedSpecialty != null)
-                        _InfoRow(
-                          label: 'Especialidad reportada',
-                          value: localizeSpecialtyLabel(
-                            detail.clientReportedSpecialty,
-                          ),
-                        ),
-                      if (detail.detectedSpecialty != null)
-                        _InfoRow(
-                          label: 'Especialidad detectada',
-                          value: localizeSpecialtyLabel(
-                            detail.detectedSpecialty,
-                          ),
-                        ),
-                      if (detail.severity != null)
-                        _InfoRow(
-                          label: 'Severidad',
-                          value: localizeStatusLabel(detail.severity),
-                        ),
-                      if (detail.confidence != null)
-                        _InfoRow(
-                          label: 'Confianza IA',
-                          value: '${detail.confidence!.toStringAsFixed(0)}%',
-                        ),
-                      if (detail.aiSummary != null &&
-                          detail.aiSummary!.trim().isNotEmpty)
-                        _InfoRow(label: 'Resumen IA', value: detail.aiSummary!),
-                      if (detail.specificDiagnosis != null &&
-                          detail.specificDiagnosis!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Diagnóstico específico',
-                          value: detail.specificDiagnosis!,
-                        ),
-                      if (detail.suggestedService != null &&
-                          detail.suggestedService!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Servicio sugerido',
-                          value: detail.suggestedService!,
-                        ),
-                      if (detail.customerRecommendation != null &&
-                          detail.customerRecommendation!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Recomendacion para el cliente',
-                          value: detail.customerRecommendation!,
-                        ),
-                      if (detail.operatorNotes != null &&
-                          detail.operatorNotes!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Notas para el operario',
-                          value: detail.operatorNotes!,
-                        ),
-                      if (detail.audioTranscript != null &&
-                          detail.audioTranscript!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Transcripción de audio',
-                          value: detail.audioTranscript!,
-                        ),
-                      if (detail.audioSummary != null &&
-                          detail.audioSummary!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Resumen de audio',
-                          value: detail.audioSummary!,
-                        ),
-                      _InfoRow(
-                        label: 'Ubicacion del cliente',
-                        value: _formatClientLocation(
-                          incidentLatitud,
-                          incidentLongitud,
-                        ),
-                      ),
-                      if (detail.requiresTow != null)
-                        _InfoRow(
-                          label: 'Requiere grua',
-                          value: detail.requiresTow! ? 'Si' : 'No',
-                        ),
-                      if (detail.observations != null &&
-                          detail.observations!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Observaciones',
-                          value: detail.observations!,
-                        ),
-                      if (_formatImageLabels(detail.imageLabels) != null)
-                        _InfoRow(
-                          label: 'Etiquetas de imagen',
-                          value: _formatImageLabels(detail.imageLabels)!,
-                        ),
-                      if (detail.visualEvidenceTags.isNotEmpty)
-                        _InfoRow(
-                          label: 'Evidencias visuales',
-                          value: detail.visualEvidenceTags.join(', '),
-                        ),
-                      if (detail.suggestedTools.isNotEmpty)
-                        _InfoRow(
-                          label: 'Herramientas sugeridas',
-                          value: detail.suggestedTools.join(', '),
-                        ),
-                      if (detail.prequotationMin != null &&
-                          detail.prequotationMax != null)
-                        _InfoRow(
-                          label: 'Pre-cotizacion',
-                          value:
-                              '${detail.prequotationCurrency ?? 'BOB'} ${detail.prequotationMin!.toStringAsFixed(2)} - ${detail.prequotationMax!.toStringAsFixed(2)}',
-                        ),
-                      _InfoRow(
-                        label: 'Evidencias',
-                        value:
-                            '${detail.evidenceSummary.images} imagen(es), ${detail.evidenceSummary.audio} audio(s)',
-                      ),
-                      if (detail.audioAnalysisType ==
-                          'MECHANICAL_SOUND_EXPERIMENTAL')
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text(
-                            'El audio del cliente no contiene voz clara. El análisis por sonido mecánico es experimental.',
-                          ),
-                        ),
-                      if (detail.requiresManualReview)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text(
-                            'La IA no tuvo suficiente confianza. Registra diagnóstico manual antes de continuar.',
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Evidencia del cliente',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      if (detail.aiSummary != null &&
-                          detail.aiSummary!.trim().isNotEmpty)
-                        _InfoRow(label: 'Resumen IA', value: detail.aiSummary!),
-                      _InfoRow(
-                        label: 'Transcripción de audio',
-                        value: detail.audioTranscript?.trim().isNotEmpty == true
-                            ? detail.audioTranscript!
-                            : 'No se adjuntó audio.',
-                      ),
-                      if (detail.audioSummary != null &&
-                          detail.audioSummary!.trim().isNotEmpty)
-                        _InfoRow(
-                          label: 'Resumen de audio',
-                          value: detail.audioSummary!,
-                        ),
-                      _InfoRow(
-                        label: 'Confianza IA',
-                        value: detail.confidence != null
-                            ? '${detail.confidence!.toStringAsFixed(0)}%'
-                            : 'Sin dato',
-                      ),
-                      _InfoRow(
-                        label: 'Revisión manual',
-                        value: detail.requiresManualReview ? 'Requerida' : 'No',
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                OperatorNavigationMap(
-                  incidentLatitud: incidentLatitud,
-                  incidentLongitud: incidentLongitud,
-                  operarioLatitud: operarioLatitud,
-                  operarioLongitud: operarioLongitud,
-                  lastLocationAt: lastLocationAt,
-                  routePoints: navigation?.routePoints,
-                  routeDistanceMeters: navigation?.routeDistanceMeters,
-                  routeDurationSeconds: navigation?.routeDurationSeconds,
-                ),
-                const SizedBox(height: 16),
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (incidentLatitud != null && incidentLongitud != null)
-                        _InfoRow(
-                          label: 'Ubicacion del incidente',
-                          value:
-                              '${incidentLatitud.toStringAsFixed(5)}, ${incidentLongitud.toStringAsFixed(5)}',
-                        )
-                      else
-                        const Text(
-                          'La ubicacion del incidente no esta disponible.',
-                        ),
-                      const SizedBox(height: 8),
-                      if (operarioLatitud != null && operarioLongitud != null)
-                        _InfoRow(
-                          label: 'Tu ubicacion actual',
-                          value:
-                              '${operarioLatitud.toStringAsFixed(5)}, ${operarioLongitud.toStringAsFixed(5)}',
-                        )
-                      else
-                        const Text(
-                          'Envia tu ubicacion actual para iniciar el seguimiento.',
-                        ),
-                      if (lastLocationAt != null)
-                        _InfoRow(
-                          label: 'Ultima actualizacion',
-                          value: _formatDate(lastLocationAt),
-                        ),
-                      if (navigation?.currentDistanceMeters != null)
-                        _InfoRow(
-                          label: 'Distancia al incidente',
-                          value:
-                              '${(navigation!.currentDistanceMeters! / 1000).toStringAsFixed(2)} km',
-                        ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton(
-                            onPressed: canSendLocation && !_isSendingLocation
-                                ? _sendCurrentLocation
-                                : null,
-                            child: Text(
-                              _isSendingLocation
-                                  ? 'Enviando ubicacion...'
-                                  : 'Enviar mi ubicacion actual',
+                      if (navigation?.routeDistanceMeters != null ||
+                          navigation?.routeDurationSeconds != null)
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 16,
+                          child: Material(
+                            elevation: 6,
+                            borderRadius: BorderRadius.circular(16),
+                            color: Colors.white,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 14,
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade50,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      Icons.route,
+                                      color: Colors.blue.shade700,
+                                      size: 24,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (navigation?.routeDurationSeconds !=
+                                            null)
+                                          Text(
+                                            _formatDuration(
+                                              navigation!.routeDurationSeconds!,
+                                            ),
+                                            style: theme.textTheme.titleLarge
+                                                ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                              color:
+                                                  theme.colorScheme.onSurface,
+                                            ),
+                                          ),
+                                        if (navigation?.routeDistanceMeters !=
+                                            null)
+                                          Text(
+                                            '${(navigation!.routeDistanceMeters! / 1000).toStringAsFixed(1)} km de distancia',
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                              color: theme.colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (navigation?.currentDistanceMeters != null)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.shade50,
+                                        borderRadius:
+                                            BorderRadius.circular(20),
+                                      ),
+                                      child: Text(
+                                        '${(navigation!.currentDistanceMeters! / 1000).toStringAsFixed(1)} km restantes',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.green.shade700,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
-                          OutlinedButton(
-                            onPressed:
-                                incidentLatitud != null &&
-                                    incidentLongitud != null &&
-                                    !_isOpeningMaps
-                                ? () => _openRouteInMaps(
-                                    incidentLatitud,
-                                    incidentLongitud,
-                                  )
-                                : null,
-                            child: Text(
-                              _isOpeningMaps
-                                  ? 'Abriendo ruta...'
-                                  : 'Abrir ruta en mapas',
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                if (progress != null && progress.timeline.isNotEmpty)
-                  AppCard(
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _StatusCard(
+                    stateColor: _stateColor(detail.serviceState),
+                    serviceState: detail.serviceState,
+                    workshopName: detail.workshopName,
+                    arrived: arrived,
+                    hasNavigation: navigation != null,
+                  ),
+                ),
+                if (arrived) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _ArrivalCelebration(
+                      isOperator: true,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: AppCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Historial operativo',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 12),
-                        ...progress.timeline.map(
-                          (item) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        InkWell(
+                          onTap: () =>
+                              setState(() => _showServiceInfo = !_showServiceInfo),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
                               children: [
-                                Text(
-                                  _formatDate(item.timestamp),
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
+                                Icon(
+                                  Icons.description_outlined,
+                                  size: 20,
+                                  color: theme.colorScheme.primary,
                                 ),
-                                const SizedBox(height: 4),
-                                Text(_humanizeTimelineAction(item.action)),
-                                if (item.newState != null)
-                                  Text(
-                                    'Estado: ${_friendlyOperatorState(item.newState!)}',
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Informacion del servicio',
+                                    style: theme.textTheme.titleSmall,
                                   ),
-                                if (item.observation != null &&
-                                    item.observation!.trim().isNotEmpty)
-                                  Text(item.observation!),
+                                ),
+                                Icon(
+                                  _showServiceInfo
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 20,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
                               ],
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                if (progress != null) const SizedBox(height: 16),
-                if (needsProfileAcknowledgement)
-                  AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Antes de iniciar la ruta debes revisar el perfil tecnico del servicio.',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton(
-                            onPressed: _isAcknowledgingProfile
-                                ? null
-                                : _acknowledgeProfile,
-                            child: Text(
-                              _isAcknowledgingProfile
-                                  ? 'Guardando revision...'
-                                  : 'Marcar perfil como revisado',
-                            ),
+                        if (_showServiceInfo) ...[
+                          const Divider(height: 16),
+                          _InfoRow(
+                            label: 'Estado del incidente',
+                            value: localizeStatusLabel(detail.incidentState),
                           ),
-                        ),
+                          if (detail.clientReportedSpecialty != null)
+                            _InfoRow(
+                              label: 'Especialidad reportada',
+                              value: localizeSpecialtyLabel(
+                                  detail.clientReportedSpecialty!),
+                            ),
+                          if (detail.detectedSpecialty != null)
+                            _InfoRow(
+                              label: 'Especialidad detectada',
+                              value: localizeSpecialtyLabel(
+                                  detail.detectedSpecialty!),
+                            ),
+                          if (detail.severity != null)
+                            _InfoRow(
+                              label: 'Severidad',
+                              value: localizeStatusLabel(detail.severity!),
+                            ),
+                          if (detail.requiresTow != null)
+                            _InfoRow(
+                              label: 'Requiere grua',
+                              value: detail.requiresTow! ? 'Si' : 'No',
+                            ),
+                          _InfoRow(
+                            label: 'Evidencias',
+                            value:
+                                '${detail.evidenceSummary.images} imagen(es), ${detail.evidenceSummary.audio} audio(s)',
+                          ),
+                          if (detail.audioTranscript != null &&
+                              detail.audioTranscript!.trim().isNotEmpty)
+                            _InfoRow(
+                              label: 'Transcripcion de audio',
+                              value: detail.audioTranscript!,
+                            ),
+                          if (detail.audioSummary != null &&
+                              detail.audioSummary!.trim().isNotEmpty)
+                            _InfoRow(
+                              label: 'Resumen de audio',
+                              value: detail.audioSummary!,
+                            ),
+                          if (detail.audioAnalysisType ==
+                              'MECHANICAL_SOUND_EXPERIMENTAL')
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'El audio no contiene voz clara. El analisis por sonido mecanico es experimental.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Colors.orange.shade700,
+                                ),
+                              ),
+                            ),
+                          if (detail.requiresManualReview)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'La IA no tiene certeza completa. El taller realizara diagnostico fisico.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Colors.orange.shade700,
+                                ),
+                              ),
+                            ),
+                        ],
                       ],
-                    ),
-                  ),
-                if (needsProfileAcknowledgement) const SizedBox(height: 16),
-                if (isClosedOperationally)
-                  const AppCard(
-                    child: Text('El servicio ya fue cerrado operativamente.'),
-                  ),
-                if (isClosedOperationally) const SizedBox(height: 16),
-                if (nextActionLabel != null)
-                  AppPrimaryButton(
-                    label: nextActionLabel,
-                    isLoading: _isSubmitting,
-                    onPressed: _isSubmitting || needsProfileAcknowledgement
-                        ? null
-                        : () => _runMainAction(viewModel),
-                  ),
-                if (nextActionLabel != null) const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: () {
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go(AppRoutes.operatorHome);
-                      }
-                    },
-                    child: Text(
-                      isClosedOperationally
-                          ? 'Volver a servicios asignados'
-                          : 'Volver',
                     ),
                   ),
                 ),
+                if (detail.aiSummary != null &&
+                    detail.aiSummary!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          InkWell(
+                            onTap: () => setState(
+                                () => _showDiagnosis = !_showDiagnosis),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.psychology_outlined,
+                                    size: 20,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Diagnostico IA',
+                                      style: theme.textTheme.titleSmall,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: detail.confidence != null &&
+                                              detail.confidence! >= 70
+                                          ? Colors.green.shade50
+                                          : Colors.orange.shade50,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      '${detail.confidence?.toStringAsFixed(0) ?? '?'}%',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: detail.confidence != null &&
+                                                detail.confidence! >= 70
+                                            ? Colors.green.shade700
+                                            : Colors.orange.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    _showDiagnosis
+                                        ? Icons.expand_less
+                                        : Icons.expand_more,
+                                    size: 20,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (_showDiagnosis) ...[
+                            const Divider(height: 16),
+                            _InfoRow(
+                              label: 'Resumen',
+                              value: detail.aiSummary!,
+                            ),
+                            if (detail.specificDiagnosis != null &&
+                                detail.specificDiagnosis!.trim().isNotEmpty)
+                              _InfoRow(
+                                label: 'Diagnostico especifico',
+                                value: detail.specificDiagnosis!,
+                              ),
+                            if (detail.suggestedService != null &&
+                                detail.suggestedService!.trim().isNotEmpty)
+                              _InfoRow(
+                                label: 'Servicio sugerido',
+                                value: detail.suggestedService!,
+                              ),
+                            if (detail.customerRecommendation != null &&
+                                detail.customerRecommendation!
+                                    .trim().isNotEmpty)
+                              _InfoRow(
+                                label: 'Recomendacion para el cliente',
+                                value: detail.customerRecommendation!,
+                              ),
+                            if (detail.operatorNotes != null &&
+                                detail.operatorNotes!.trim().isNotEmpty)
+                              _InfoRow(
+                                label: 'Notas para el operario',
+                                value: detail.operatorNotes!,
+                              ),
+                            if (detail.suggestedTools.isNotEmpty)
+                              _InfoRow(
+                                label: 'Herramientas sugeridas',
+                                value: detail.suggestedTools.join(', '),
+                              ),
+                            if (detail.prequotationMin != null &&
+                                detail.prequotationMax != null)
+                              _InfoRow(
+                                label: 'Pre-cotizacion',
+                                value:
+                                    '${detail.prequotationCurrency ?? 'BOB'} ${detail.prequotationMin!.toStringAsFixed(2)} - ${detail.prequotationMax!.toStringAsFixed(2)}',
+                              ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                if (progress != null && progress.timeline.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _TimelineCard(
+                      timeline: progress.timeline,
+                      showTimeline: _showTimeline,
+                      onToggle: () =>
+                          setState(() => _showTimeline = !_showTimeline),
+                    ),
+                  ),
+                ],
+                if (canSendLocation) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSendingLocation
+                                ? null
+                                : _sendCurrentLocation,
+                            icon: _isSendingLocation
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.my_location, size: 18),
+                            label: Text(
+                              _isSendingLocation
+                                  ? 'Enviando...'
+                                  : 'Enviar ubicacion',
+                            ),
+                          ),
+                        ),
+                        if (incidentLatitud != null &&
+                            incidentLongitud != null) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _isOpeningMaps
+                                  ? null
+                                  : () => _openRouteInMaps(
+                                        incidentLatitud,
+                                        incidentLongitud,
+                                      ),
+                              icon: _isOpeningMaps
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.map_outlined, size: 18),
+                              label: Text(
+                                _isOpeningMaps
+                                    ? 'Abriendo...'
+                                    : 'Abrir en maps',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+                if (needsProfileAcknowledgement) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _ProfileBanner(
+                      isLoading: _isAcknowledgingProfile,
+                      onAcknowledge: _acknowledgeProfile,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (isClosedOperationally)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: AppCard(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.check_circle,
+                              color: Colors.green.shade600,
+                              size: 24,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Servicio cerrado operativamente.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (nextActionLabel != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: AppPrimaryButton(
+                      label: nextActionLabel,
+                      isLoading: _isSubmitting,
+                      onPressed:
+                          _isSubmitting || needsProfileAcknowledgement
+                              ? null
+                              : () => _runMainAction(viewModel),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                SizedBox(
+                  width: double.infinity,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: OutlinedButton(
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go(AppRoutes.operatorHome);
+                        }
+                      },
+                      child: Text(
+                        isClosedOperationally
+                            ? 'Volver a servicios asignados'
+                            : 'Volver',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+String _formatDuration(double seconds) {
+  final totalMinutes = (seconds / 60).round();
+  if (totalMinutes < 60) return '$totalMinutes min';
+  final hours = totalMinutes ~/ 60;
+  final minutes = totalMinutes % 60;
+  if (minutes == 0) return '${hours}h';
+  return '${hours}h ${minutes}min';
+}
+
+class _StatusCard extends StatelessWidget {
+  final Color stateColor;
+  final String serviceState;
+  final String? workshopName;
+  final bool arrived;
+  final bool hasNavigation;
+
+  const _StatusCard({
+    required this.stateColor,
+    required this.serviceState,
+    this.workshopName,
+    required this.arrived,
+    required this.hasNavigation,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 6,
+            decoration: BoxDecoration(
+              color: stateColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: stateColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    arrived
+                        ? Icons.check_circle_outline
+                        : hasNavigation
+                            ? Icons.navigation
+                            : Icons.pending_outlined,
+                    color: stateColor,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: stateColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              _friendlyOperatorState(serviceState),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: stateColor,
+                              ),
+                            ),
+                          ),
+                          if (arrived) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                'Llegaste',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green.shade700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (workshopName != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.store_outlined,
+                              size: 16,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              workshopName!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArrivalCelebration extends StatelessWidget {
+  final bool isOperator;
+  const _ArrivalCelebration({required this.isOperator});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.green.shade500, Colors.green.shade700],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.shade400.withValues(alpha: 0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              isOperator ? Icons.location_on : Icons.celebration_outlined,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isOperator
+                      ? '¡Llegaste al lugar!'
+                      : '¡El operario llego!',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isOperator
+                      ? 'Inicia el diagnostico fisico del vehiculo.'
+                      : 'Esta en el lugar del incidente para atenderte.',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineCard extends StatelessWidget {
+  final List<OperatorProgressTimelineItemModel> timeline;
+  final bool showTimeline;
+  final VoidCallback onToggle;
+
+  const _TimelineCard({
+    required this.timeline,
+    required this.showTimeline,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.timeline,
+                    size: 20,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Historial operativo',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                  Text(
+                    '${timeline.length} eventos',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    showTimeline ? Icons.expand_less : Icons.expand_more,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (showTimeline) ...[
+            const Divider(height: 16),
+            ...List.generate(timeline.length, (index) {
+              final item = timeline[index];
+              final isLast = index == timeline.length - 1;
+              return _TimelineItem(
+                item: item,
+                isLast: isLast,
+                isFirst: index == 0,
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineItem extends StatelessWidget {
+  final OperatorProgressTimelineItemModel item;
+  final bool isLast;
+  final bool isFirst;
+
+  const _TimelineItem({
+    required this.item,
+    required this.isLast,
+    required this.isFirst,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final icon = _timelineIcon(item.action);
+    final color = _timelineColor(item.action);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 40,
+            child: Column(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 16, color: color),
+                ),
+                if (!isLast)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: color.withValues(alpha: 0.2),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (item.timestamp != null)
+                    Text(
+                      _formatDate(item.timestamp!),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                    ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _humanizeTimelineAction(item.action),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (item.newState != null)
+                    Text(
+                      'Estado: ${_friendlyOperatorState(item.newState!)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  if (item.observation != null &&
+                      item.observation!.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        item.observation!,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+IconData _timelineIcon(String action) {
+  switch (action) {
+    case 'NAVEGACION_INICIADA':
+      return Icons.navigation;
+    case 'OPERARIO_EN_SITIO':
+      return Icons.location_on;
+    case 'SERVICIO_ESTADO_ACTUALIZADO':
+      return Icons.update;
+    default:
+      return Icons.circle;
+  }
+}
+
+Color _timelineColor(String action) {
+  switch (action) {
+    case 'NAVEGACION_INICIADA':
+      return Colors.blue;
+    case 'OPERARIO_EN_SITIO':
+      return Colors.green;
+    default:
+      return Colors.grey;
+  }
+}
+
+class _ProfileBanner extends StatelessWidget {
+  final bool isLoading;
+  final VoidCallback onAcknowledge;
+
+  const _ProfileBanner({
+    required this.isLoading,
+    required this.onAcknowledge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.amber.shade200),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.amber.shade800, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Antes de iniciar la ruta, revisa el perfil tecnico.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.amber.shade900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: isLoading ? null : onAcknowledge,
+              icon: isLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.visibility, size: 18),
+              label: Text(
+                isLoading
+                    ? 'Guardando...'
+                    : 'Marcar perfil como revisado',
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -694,7 +1360,7 @@ class _RepairCompletionDialogState extends State<_RepairCompletionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('¿Finalizar atencion?'),
+      title: const Text('Finalizar atencion'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -747,7 +1413,9 @@ class _ClosedServiceView extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              const Text('Puede haber sido completado, pagado o cerrado.'),
+              const Text(
+                'Puede haber sido completado, pagado o cerrado.',
+              ),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -901,10 +1569,7 @@ String _friendlyOperatorState(String state) {
   }
 }
 
-String _formatDate(DateTime? value) {
-  if (value == null) {
-    return 'Fecha no disponible';
-  }
+String _formatDate(DateTime value) {
   final localValue = value.toLocal();
   return '${localValue.day.toString().padLeft(2, '0')}/'
       '${localValue.month.toString().padLeft(2, '0')}/'
@@ -926,37 +1591,6 @@ String _humanizeTimelineAction(String action) {
   }
 }
 
-String? _formatImageLabels(dynamic value) {
-  if (value is List) {
-    final labels = value
-        .map((item) => item.toString().trim())
-        .where((item) => item.isNotEmpty)
-        .toList();
-    return labels.isEmpty ? null : labels.join(', ');
-  }
-  if (value is Map) {
-    final parts = <String>[];
-    value.forEach((key, item) {
-      final rendered = item?.toString().trim();
-      if (rendered != null && rendered.isNotEmpty) {
-        parts.add('$key: $rendered');
-      }
-    });
-    return parts.isEmpty ? null : parts.join(', ');
-  }
-  if (value is String && value.trim().isNotEmpty) {
-    return value.trim();
-  }
-  return null;
-}
-
-String _formatClientLocation(double? latitud, double? longitud) {
-  if (latitud == null || longitud == null) {
-    return 'Ubicacion del cliente no disponible';
-  }
-  return '${latitud.toStringAsFixed(5)}, ${longitud.toStringAsFixed(5)}';
-}
-
 class _FriendlyLocationException implements Exception {
   final String message;
 
@@ -970,7 +1604,10 @@ class _OpenMapsException implements Exception {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({
+    required this.label,
+    required this.value,
+  });
 
   final String label;
   final String value;

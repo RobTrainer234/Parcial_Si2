@@ -36,12 +36,47 @@ export interface DashboardKpis {
   average_rating: number | null;
   first_contact_resolution_rate: number | null;
   average_acceptance_time_minutes: number | null;
+  average_report_to_workshop_assignment_minutes: number | null;
+  average_operario_assignment_time_minutes: number | null;
+  average_arrival_time_minutes: number | null;
+  average_assignment_to_arrival_minutes: number | null;
   average_completion_time_minutes: number | null;
+  cancelled_cases: number;
+  unattended_cases: number;
+  sla_compliance_rate: number | null;
+  sla_met_services: number;
+  sla_evaluated_services: number;
+  tenant_efficiency_score: number | null;
+}
+
+export interface DashboardIncidentZone {
+  zone_label: string;
+  center_latitud: number | string;
+  center_longitud: number | string;
+  incident_count: number;
+  dominant_incident_type: string;
 }
 
 export interface DashboardOperations {
   services_by_state: DashboardCountItem[];
   requests_by_status: DashboardCountItem[];
+  incidents_by_severity: DashboardCountItem[];
+  incidents_by_detected_specialty: DashboardCountItem[];
+  incidents_by_type: DashboardCountItem[];
+  incident_zones: DashboardIncidentZone[];
+}
+
+export interface DashboardOperarioRankingItem {
+  operario_id: number;
+  nombre_completo: string;
+  efficiency_score: number;
+  completed_services: number;
+  average_rating: number | null;
+  average_completion_time_minutes: number | null;
+}
+
+export interface DashboardOperarios {
+  operario_ranking: DashboardOperarioRankingItem[];
 }
 
 export interface DashboardFinancial {
@@ -59,7 +94,7 @@ export interface DashboardOverviewResponse {
   kpis: DashboardKpis;
   operations: DashboardOperations;
   financial: DashboardFinancial;
-  operarios: Record<string, unknown>;
+  operarios: DashboardOperarios;
   reputation: Record<string, unknown>;
   action_items: DashboardActionItem[];
 }

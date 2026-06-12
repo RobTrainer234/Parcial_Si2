@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
@@ -18,11 +19,20 @@ class NotificationsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(notificationsControllerProvider);
+    final realtimeStatus =
+        ref.watch(realtimeConnectionStatusProvider).valueOrNull;
 
     return AppPageScaffold(
       label: 'AVISOS',
       title: 'Notificaciones',
-      subtitle: 'Revisa novedades sobre tus solicitudes y servicios.',
+      subtitle: realtimeStatus == RealtimeConnectionStatus.connected
+          ? 'WebSocket conectado: las novedades aparecen en tiempo real.'
+          : 'Push permanece activo; conectando el canal WebSocket en vivo.',
+      leading: IconButton(
+        tooltip: 'Volver',
+        onPressed: () => context.pop(),
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
       actions: IconButton(
         tooltip: 'Actualizar',
         onPressed: () =>

@@ -9,6 +9,7 @@ class AppPageScaffold extends StatelessWidget {
     this.label,
     this.title,
     this.subtitle,
+    this.leading,
     this.actions,
     this.padding = const EdgeInsets.fromLTRB(20, 16, 20, 24),
   });
@@ -17,6 +18,7 @@ class AppPageScaffold extends StatelessWidget {
   final String? label;
   final String? title;
   final String? subtitle;
+  final Widget? leading;
   final Widget? actions;
   final EdgeInsetsGeometry padding;
 
@@ -39,6 +41,7 @@ class AppPageScaffold extends StatelessWidget {
                       label: label ?? '',
                       title: title ?? '',
                       subtitle: subtitle,
+                      leading: leading,
                       action: actions,
                     ),
                     const SizedBox(height: 24),

@@ -77,15 +77,9 @@ class _IncidentMatchmakingPageState
       title: 'Buscar taller compatible',
       subtitle:
           'El sistema seleccionará talleres según la falla y la ubicación.',
-      actions: IconButton(
+      leading: IconButton(
         tooltip: 'Volver',
-        onPressed: () {
-          if (Navigator.of(context).canPop()) {
-            context.pop();
-          } else {
-            context.go(AppRoutes.clientHome);
-          }
-        },
+        onPressed: () => context.pop(),
         icon: const Icon(Icons.arrow_back_rounded),
       ),
       child: state.when(

@@ -16,6 +16,7 @@ from .persona import (
     TallerEspecialidad,
     Usuario,
 )
+from .producto import CategoriaProducto, TallerRepuesto
 from .registro_pendiente import RegistroPendiente
 from .seguro import CoberturaEspecialidad, Seguro, TipoCobertura
 from .servicio import (
@@ -35,6 +36,7 @@ __all__ = [
     "Bitacora",
     "Calificacion",
     "CatalogoServicioTaller",
+    "CategoriaProducto",
     "Cliente",
     "CoberturaEspecialidad",
     "Color",
@@ -63,6 +65,7 @@ __all__ = [
     "Taller",
     "TallerArchivo",
     "TallerEspecialidad",
+    "TallerRepuesto",
     "TimestampMixin",
     "TipoCobertura",
     "Usuario",

@@ -11,6 +11,7 @@ import { MetricCardComponent } from '../../../shared/components/metric-card.comp
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
 import {
+  DashboardCountItem,
   DashboardMonthlyRevenueItem,
   DashboardOverviewResponse,
   VoiceDashboardReportResponse,
@@ -99,6 +100,58 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
           </app-card>
         </section>
 
+        <section class="metric-section">
+          <div class="section-heading">
+            <div>
+              <span class="section-heading__eyebrow">Rendimiento operacional</span>
+              <h2>Tiempos de respuesta y SLA</h2>
+            </div>
+            <span class="period-pill">Datos reales de los ultimos 30 dias</span>
+          </div>
+          <div class="dashboard-kpis">
+            <app-metric-card
+              label="Reporte a taller asignado"
+              [value]="formatMinutes(data.kpis.average_report_to_workshop_assignment_minutes)"
+              hint="Tiempo promedio desde el reporte hasta la aceptacion"
+            />
+            <app-metric-card
+              label="Asignacion de operario"
+              [value]="formatMinutes(data.kpis.average_operario_assignment_time_minutes)"
+              hint="Desde la aceptacion del taller"
+            />
+            <app-metric-card
+              label="Llegada total"
+              [value]="formatMinutes(data.kpis.average_arrival_time_minutes)"
+              hint="Desde el reporte hasta la llegada"
+            />
+            <app-metric-card
+              label="Asignacion a llegada"
+              [value]="formatMinutes(data.kpis.average_assignment_to_arrival_minutes)"
+              hint="Tiempo de desplazamiento del operario"
+            />
+            <app-metric-card
+              label="Cumplimiento SLA"
+              [value]="formatPercentage(data.kpis.sla_compliance_rate)"
+              [hint]="slaHint(data)"
+            />
+            <app-metric-card
+              label="Eficiencia del taller"
+              [value]="formatPercentage(data.kpis.tenant_efficiency_score)"
+              hint="Combina cumplimiento SLA y finalizacion"
+            />
+            <app-metric-card
+              label="Casos cancelados"
+              [value]="formatInteger(data.kpis.cancelled_cases)"
+              hint="Emergencias canceladas en el periodo"
+            />
+            <app-metric-card
+              label="Casos no atendidos"
+              [value]="formatInteger(data.kpis.unattended_cases)"
+              hint="Solicitudes rechazadas o expiradas sin servicio"
+            />
+          </div>
+        </section>
+
         <section class="section-grid">
           <app-card
             title="Acciones prioritarias"
@@ -145,6 +198,82 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
                 title="Sin servicios en el periodo"
                 message="Todavía no hay estados de servicio que mostrar con el filtro actual."
               />
+            }
+          </app-card>
+        </section>
+
+        <section class="section-grid">
+          <app-card
+            title="Incidentes por tipo"
+            subtitle="Clasificacion operacional basada en los incidentes registrados."
+          >
+            @if (data.operations.incidents_by_type.length) {
+              <div class="distribution">
+                @for (item of data.operations.incidents_by_type; track item.label) {
+                  <div class="distribution__item">
+                    <div class="distribution__labels">
+                      <strong>{{ readableLabel(item.label) }}</strong>
+                      <span>{{ formatInteger(item.count) }}</span>
+                    </div>
+                    <div class="revenue-bars__track">
+                      <span
+                        class="revenue-bars__bar"
+                        [style.width.%]="distributionWidth(item.count, data.operations.incidents_by_type)"
+                      ></span>
+                    </div>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state title="Sin incidentes" message="No hay incidentes clasificados en el periodo." />
+            }
+          </app-card>
+
+          <app-card
+            title="Zonas con mas incidentes"
+            subtitle="Agrupacion geografica aproximada para detectar concentraciones."
+          >
+            @if (data.operations.incident_zones.length) {
+              <div class="list">
+                @for (zone of data.operations.incident_zones; track zone.zone_label) {
+                  <div class="zone-row">
+                    <div>
+                      <strong>{{ zone.zone_label }}</strong>
+                      <small>{{ readableLabel(zone.dominant_incident_type) }} predominante</small>
+                    </div>
+                    <span class="zone-row__count">{{ formatInteger(zone.incident_count) }}</span>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state title="Sin zonas detectadas" message="No hay ubicaciones registradas en el periodo." />
+            }
+          </app-card>
+        </section>
+
+        <section class="section-grid">
+          <app-card
+            title="Eficiencia del equipo"
+            subtitle="Ranking de operarios del taller segun respuesta, finalizacion y calificacion."
+          >
+            @if (data.operarios.operario_ranking.length) {
+              <div class="list">
+                @for (operario of data.operarios.operario_ranking; track operario.operario_id; let position = $index) {
+                  <div class="operator-row">
+                    <span class="operator-row__position">{{ position + 1 }}</span>
+                    <div class="operator-row__identity">
+                      <strong>{{ operario.nombre_completo }}</strong>
+                      <small>
+                        {{ formatInteger(operario.completed_services) }} finalizados
+                        · {{ formatMinutes(operario.average_completion_time_minutes) }}
+                      </small>
+                    </div>
+                    <strong>{{ formatPercentage(operario.efficiency_score) }}</strong>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state title="Sin ranking disponible" message="Aun no existen servicios suficientes para comparar al equipo." />
             }
           </app-card>
         </section>
@@ -263,6 +392,46 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         display: grid;
         gap: var(--space-4);
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+
+      .metric-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      .section-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+      }
+
+      .section-heading h2 {
+        margin: var(--space-1) 0 0;
+      }
+
+      .section-heading__eyebrow {
+        color: var(--color-primary);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .period-pill,
+      .zone-row__count,
+      .operator-row__position {
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+        color: var(--color-primary);
+        font-weight: 800;
+      }
+
+      .period-pill {
+        padding: 0.55rem 0.85rem;
+        font-size: 0.78rem;
       }
 
       .list {
@@ -418,6 +587,48 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         background: linear-gradient(90deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 62%, #ffffff));
       }
 
+      .distribution {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      .distribution__labels,
+      .zone-row,
+      .operator-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+      }
+
+      .zone-row,
+      .operator-row {
+        padding: var(--space-3);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+      }
+
+      .zone-row small,
+      .operator-row small {
+        display: block;
+        margin-top: var(--space-1);
+        color: var(--color-text-muted);
+      }
+
+      .zone-row__count,
+      .operator-row__position {
+        display: grid;
+        min-width: 2.3rem;
+        min-height: 2.3rem;
+        padding: 0.4rem;
+        place-items: center;
+      }
+
+      .operator-row__identity {
+        flex: 1;
+      }
+
       .health {
         display: flex;
         flex-direction: column;
@@ -548,6 +759,19 @@ export class AdminDashboardPage {
     return `${value.toFixed(1)}%`;
   }
 
+  protected slaHint(data: DashboardOverviewResponse): string {
+    return `${this.formatInteger(data.kpis.sla_met_services)} de ${this.formatInteger(data.kpis.sla_evaluated_services)} servicios dentro del tiempo esperado`;
+  }
+
+  protected readableLabel(value: string): string {
+    return value.replaceAll('_', ' ').toLocaleLowerCase('es-BO').replace(/^\w/, (letter) => letter.toUpperCase());
+  }
+
+  protected distributionWidth(count: number, items: DashboardCountItem[]): number {
+    const maxCount = Math.max(...items.map((item) => item.count), 0);
+    return maxCount ? Math.max(8, (count / maxCount) * 100) : 0;
+  }
+
   protected priorityBadgeClass(priority: string): string {
     switch (priority) {
       case 'HIGH':
@@ -609,15 +833,52 @@ export class AdminDashboardPage {
           data.kpis?.average_acceptance_time_minutes !== undefined
             ? Number(data.kpis.average_acceptance_time_minutes)
             : null,
+        average_report_to_workshop_assignment_minutes:
+          data.kpis?.average_report_to_workshop_assignment_minutes !== null &&
+          data.kpis?.average_report_to_workshop_assignment_minutes !== undefined
+            ? Number(data.kpis.average_report_to_workshop_assignment_minutes)
+            : null,
+        average_operario_assignment_time_minutes:
+          data.kpis?.average_operario_assignment_time_minutes !== null &&
+          data.kpis?.average_operario_assignment_time_minutes !== undefined
+            ? Number(data.kpis.average_operario_assignment_time_minutes)
+            : null,
+        average_arrival_time_minutes:
+          data.kpis?.average_arrival_time_minutes !== null &&
+          data.kpis?.average_arrival_time_minutes !== undefined
+            ? Number(data.kpis.average_arrival_time_minutes)
+            : null,
+        average_assignment_to_arrival_minutes:
+          data.kpis?.average_assignment_to_arrival_minutes !== null &&
+          data.kpis?.average_assignment_to_arrival_minutes !== undefined
+            ? Number(data.kpis.average_assignment_to_arrival_minutes)
+            : null,
         average_completion_time_minutes:
           data.kpis?.average_completion_time_minutes !== null &&
           data.kpis?.average_completion_time_minutes !== undefined
             ? Number(data.kpis.average_completion_time_minutes)
             : null,
+        cancelled_cases: this.asNumber(data.kpis?.cancelled_cases),
+        unattended_cases: this.asNumber(data.kpis?.unattended_cases),
+        sla_compliance_rate:
+          data.kpis?.sla_compliance_rate !== null && data.kpis?.sla_compliance_rate !== undefined
+            ? Number(data.kpis.sla_compliance_rate)
+            : null,
+        sla_met_services: this.asNumber(data.kpis?.sla_met_services),
+        sla_evaluated_services: this.asNumber(data.kpis?.sla_evaluated_services),
+        tenant_efficiency_score:
+          data.kpis?.tenant_efficiency_score !== null &&
+          data.kpis?.tenant_efficiency_score !== undefined
+            ? Number(data.kpis.tenant_efficiency_score)
+            : null,
       },
       operations: {
         services_by_state: data.operations?.services_by_state ?? [],
         requests_by_status: data.operations?.requests_by_status ?? [],
+        incidents_by_severity: data.operations?.incidents_by_severity ?? [],
+        incidents_by_detected_specialty: data.operations?.incidents_by_detected_specialty ?? [],
+        incidents_by_type: data.operations?.incidents_by_type ?? [],
+        incident_zones: data.operations?.incident_zones ?? [],
       },
       financial: {
         total_revenue: this.asNumber(data.financial?.total_revenue),
@@ -636,7 +897,9 @@ export class AdminDashboardPage {
             : null,
         monthly_revenue: data.financial?.monthly_revenue ?? [],
       },
-      operarios: data.operarios ?? {},
+      operarios: {
+        operario_ranking: data.operarios?.operario_ranking ?? [],
+      },
       reputation: data.reputation ?? {},
       action_items: data.action_items ?? [],
     };
@@ -658,11 +921,25 @@ export class AdminDashboardPage {
         average_rating: null,
         first_contact_resolution_rate: null,
         average_acceptance_time_minutes: null,
+        average_report_to_workshop_assignment_minutes: null,
+        average_operario_assignment_time_minutes: null,
+        average_arrival_time_minutes: null,
+        average_assignment_to_arrival_minutes: null,
         average_completion_time_minutes: null,
+        cancelled_cases: 0,
+        unattended_cases: 0,
+        sla_compliance_rate: null,
+        sla_met_services: 0,
+        sla_evaluated_services: 0,
+        tenant_efficiency_score: null,
       },
       operations: {
         services_by_state: [],
         requests_by_status: [],
+        incidents_by_severity: [],
+        incidents_by_detected_specialty: [],
+        incidents_by_type: [],
+        incident_zones: [],
       },
       financial: {
         total_revenue: 0,
@@ -673,7 +950,7 @@ export class AdminDashboardPage {
         projected_revenue: null,
         monthly_revenue: [],
       },
-      operarios: {},
+      operarios: { operario_ranking: [] },
       reputation: {},
       action_items: [],
     };

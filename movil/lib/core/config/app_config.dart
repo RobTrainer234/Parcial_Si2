@@ -22,4 +22,14 @@ class AppConfig {
         ? trimmed.substring(0, trimmed.length - 1)
         : trimmed;
   }
+
+  static String get realtimeWebSocketUrl {
+    final apiUri = Uri.parse(apiBaseUrl);
+    return apiUri
+        .replace(
+          scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
+          path: '${apiUri.path.replaceAll(RegExp(r'/$'), '')}/realtime/ws',
+        )
+        .toString();
+  }
 }

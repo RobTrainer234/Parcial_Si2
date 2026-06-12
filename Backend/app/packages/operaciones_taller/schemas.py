@@ -433,6 +433,10 @@ class WorkshopProfileResponse(BaseModel):
     descripcion: str | None = None
     latitud: Decimal
     longitud: Decimal
+    direccion: str | None = None
+    ciudad: str | None = None
+    zona: str | None = None
+    referencia: str | None = None
     radio_accion_km: Decimal
     activo: bool
     acepta_seguro_propio: bool
@@ -446,6 +450,10 @@ class WorkshopProfileUpdateRequest(_NormalizedModel):
     descripcion: str | None = Field(default=None, max_length=5000)
     latitud: Decimal = Field(ge=Decimal("-90"), le=Decimal("90"))
     longitud: Decimal = Field(ge=Decimal("-180"), le=Decimal("180"))
+    direccion: str | None = Field(default=None, max_length=255)
+    ciudad: str | None = Field(default=None, max_length=100)
+    zona: str | None = Field(default=None, max_length=100)
+    referencia: str | None = Field(default=None, max_length=2000)
     radio_accion_km: Decimal = Field(gt=0)
     specialty_ids: list[int] = Field(min_length=1)
     acepta_seguro_propio: bool | None = None
@@ -506,7 +514,25 @@ class WorkshopDashboardKpiResponse(BaseModel):
     average_rating: Decimal | None = None
     first_contact_resolution_rate: Decimal | None = None
     average_acceptance_time_minutes: Decimal | None = None
+    average_report_to_workshop_assignment_minutes: Decimal | None = None
+    average_operario_assignment_time_minutes: Decimal | None = None
+    average_arrival_time_minutes: Decimal | None = None
+    average_assignment_to_arrival_minutes: Decimal | None = None
     average_completion_time_minutes: Decimal | None = None
+    cancelled_cases: int
+    unattended_cases: int
+    sla_compliance_rate: Decimal | None = None
+    sla_met_services: int
+    sla_evaluated_services: int
+    tenant_efficiency_score: Decimal | None = None
+
+
+class IncidentZoneSummary(BaseModel):
+    zone_label: str
+    center_latitud: Decimal
+    center_longitud: Decimal
+    incident_count: int
+    dominant_incident_type: str
 
 
 class WorkshopDashboardOperationsResponse(BaseModel):
@@ -514,6 +540,8 @@ class WorkshopDashboardOperationsResponse(BaseModel):
     requests_by_status: list[DashboardCountItem]
     incidents_by_severity: list[DashboardCountItem]
     incidents_by_detected_specialty: list[DashboardCountItem]
+    incidents_by_type: list[DashboardCountItem]
+    incident_zones: list[IncidentZoneSummary]
     incident_heatmap_points: list["IncidentHeatmapPoint"]
     stuck_services: list[DashboardStuckServiceItem]
 

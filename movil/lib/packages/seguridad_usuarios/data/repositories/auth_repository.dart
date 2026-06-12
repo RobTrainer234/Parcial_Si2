@@ -37,6 +37,25 @@ class AuthRepository {
     await _apiClient.post('/auth/logout', requiresAuth: true);
   }
 
+  Future<void> forgotPassword(String email) async {
+    await _apiClient.post(
+      '/auth/forgot-password',
+      data: {'email': email},
+      requiresAuth: false,
+    );
+  }
+
+  Future<void> resetPassword({
+    required String token,
+    required String newPassword,
+  }) async {
+    await _apiClient.post(
+      '/auth/reset-password',
+      data: {'token': token, 'new_password': newPassword},
+      requiresAuth: false,
+    );
+  }
+
   Future<RegistrationVerifyResponseModel> startClientRegistration(
     ClientRegisterStartRequestModel request,
   ) async {

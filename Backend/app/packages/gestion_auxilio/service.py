@@ -3043,6 +3043,9 @@ def decide_service_finalization(
     service.observaciones_cierre = payload.motivo
     incident.estado = "EN_PROCESO"
 
+    if service.operario is not None and service.operario.estado_disponibilidad not in {"EN_SERVICIO", "NO_DISPONIBLE"}:
+        service.operario.estado_disponibilidad = "EN_SERVICIO"
+
     db.add(
         _create_navigation_bitacora(
             current_user=current_user,

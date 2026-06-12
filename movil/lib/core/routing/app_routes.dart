@@ -1,6 +1,8 @@
 class AppRoutes {
   static const splash = '/splash';
   static const login = '/login';
+  static const forgotPassword = '/forgot-password';
+  static const resetPassword = '/reset-password';
   static const registerClient = '/register/client';
   static const registerClientVerify = '/register/client/verify';
   static const clientHome = '/cliente/home';

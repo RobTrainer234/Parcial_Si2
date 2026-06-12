@@ -21,6 +21,10 @@ export interface WorkshopProfileUpdateRequest {
   descripcion: string | null;
   latitud: number;
   longitud: number;
+  direccion: string | null;
+  ciudad: string | null;
+  zona: string | null;
+  referencia: string | null;
   radio_accion_km: number;
   specialty_ids: number[];
   acepta_seguro_propio: boolean;
@@ -32,6 +36,10 @@ export interface WorkshopProfileResponse {
   descripcion: string | null;
   latitud: string | number;
   longitud: string | number;
+  direccion: string | null;
+  ciudad: string | null;
+  zona: string | null;
+  referencia: string | null;
   radio_accion_km: string | number;
   activo: boolean;
   acepta_seguro_propio: boolean;

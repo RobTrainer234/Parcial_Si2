@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/realtime/realtime_service.dart';
 import '../../data/models/service_prequotation_model.dart';
 import '../../data/models/tracking_history_point_model.dart';
 import '../../data/models/tracking_status_model.dart';
@@ -20,7 +21,15 @@ final serviceTrackingProvider = StateNotifierProvider.family<
     AsyncValue<ServiceTrackingViewModel>,
     int>((ref, serviceId) {
   final repository = ref.watch(clientServicesRepositoryProvider);
-  return ServiceTrackingController(repository, serviceId);
+  final controller = ServiceTrackingController(repository, serviceId);
+  ref.listen(realtimeEventsProvider, (_, next) {
+    next.whenData((event) {
+      if (event.isNotification && event.serviceId == serviceId) {
+        controller.refreshSilently();
+      }
+    });
+  });
+  return controller;
 });
 
 final servicePrequotationProvider =

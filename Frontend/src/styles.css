@@ -1,3 +1,32 @@
+@import 'leaflet/dist/leaflet.css';
+
+.workshop-map-marker {
+  background: transparent;
+  border: 0;
+}
+
+.workshop-map-marker span {
+  display: block;
+  width: 30px;
+  height: 30px;
+  border: 4px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  background: #1687ef;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+  transform: rotate(-45deg);
+}
+
+.workshop-map-marker span::after {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: '';
+  left: 11px;
+  top: 11px;
+}
+
 :root,
 html[data-theme='dark'] {
   color-scheme: dark;

@@ -72,6 +72,10 @@ class Taller(TimestampMixin, Base):
     descripcion: Mapped[str | None] = mapped_column(Text)
     latitud: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
     longitud: Mapped[Decimal] = mapped_column(Numeric(11, 8), nullable=False)
+    direccion: Mapped[str | None] = mapped_column(String(255))
+    ciudad: Mapped[str | None] = mapped_column(String(100))
+    zona: Mapped[str | None] = mapped_column(String(100))
+    referencia: Mapped[str | None] = mapped_column(Text)
     radio_accion_km: Mapped[Decimal] = mapped_column(
         Numeric(6, 2),
         nullable=False,
@@ -129,6 +133,14 @@ class Taller(TimestampMixin, Base):
         "Calificacion",
         back_populates="taller_calif",
         foreign_keys="Calificacion.id_taller_calif",
+    )
+    categorias_producto: Mapped[list[CategoriaProducto]] = relationship(
+        "CategoriaProducto",
+        back_populates="taller",
+    )
+    productos: Mapped[list[TallerRepuesto]] = relationship(
+        "TallerRepuesto",
+        back_populates="taller",
     )
 
 

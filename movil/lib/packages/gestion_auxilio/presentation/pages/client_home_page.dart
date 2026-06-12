@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,8 +15,32 @@ import '../../../seguridad_usuarios/data/models/profile_me_model.dart';
 import '../../../seguridad_usuarios/presentation/controllers/profile_controller.dart';
 import '../controllers/notifications_controller.dart';
 
-class ClientHomePage extends ConsumerWidget {
+class ClientHomePage extends ConsumerStatefulWidget {
   const ClientHomePage({super.key});
+
+  @override
+  ConsumerState<ClientHomePage> createState() => _ClientHomePageState();
+}
+
+class _ClientHomePageState extends ConsumerState<ClientHomePage> {
+  Timer? _unreadTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _unreadTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) {
+        if (mounted) ref.invalidate(unreadNotificationsCountProvider);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _unreadTimer?.cancel();
+    super.dispose();
+  }
 
   void _showMessage(BuildContext context, String message) {
     ScaffoldMessenger.of(
@@ -23,7 +49,7 @@ class ClientHomePage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dangerColor = theme.colorScheme.error;
     final profileState = ref.watch(profileControllerProvider);
@@ -301,17 +327,7 @@ class _ClientHeaderActions extends StatelessWidget {
             onTap: onOpenProfile,
           ),
           const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const AppThemeToggleButton(),
-              IconButton(
-                tooltip: 'Perfil',
-                onPressed: onOpenProfile,
-                icon: const Icon(Icons.person_rounded, size: 20),
-              ),
-            ],
-          ),
+          const AppThemeToggleButton(),
         ],
       ),
     );

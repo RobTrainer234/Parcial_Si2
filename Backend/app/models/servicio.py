@@ -210,6 +210,10 @@ class ServicioRepuesto(TimestampMixin, Base):
         ForeignKey("servicio.id_servicio", ondelete="CASCADE"),
         nullable=False,
     )
+    id_taller_repuesto: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("taller_repuesto.id_taller_repuesto", ondelete="SET NULL"),
+    )
     descripcion: Mapped[str] = mapped_column(String(150), nullable=False)
     cantidad: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),

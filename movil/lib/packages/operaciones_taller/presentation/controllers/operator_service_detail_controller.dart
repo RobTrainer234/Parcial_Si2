@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/auth/auth_controller.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../data/models/operator_navigation_status_model.dart';
 import '../../data/models/operator_progress_response_model.dart';
 import '../../data/models/operator_service_detail_model.dart';
@@ -34,7 +35,15 @@ final operatorServiceDetailProvider =
         }),
       );
       final repository = ref.watch(operatorServicesRepositoryProvider);
-      return OperatorServiceDetailController(repository, serviceId);
+      final controller = OperatorServiceDetailController(repository, serviceId);
+      ref.listen(realtimeEventsProvider, (_, next) {
+        next.whenData((event) {
+          if (event.isNotification && event.serviceId == serviceId) {
+            controller.refresh();
+          }
+        });
+      });
+      return controller;
     });
 
 class OperatorServiceDetailController

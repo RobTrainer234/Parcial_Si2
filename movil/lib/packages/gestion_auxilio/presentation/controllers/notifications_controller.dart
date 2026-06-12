@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/auth/auth_controller.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../data/models/notification_item_model.dart';
 import '../../data/repositories/notifications_repository.dart';
 
@@ -53,6 +56,13 @@ class NotificationsController
     required bool shouldLoad,
   }) : _shouldLoad = shouldLoad,
        super(const AsyncValue.loading()) {
+    _ref.listen(realtimeEventsProvider, (_, next) {
+      next.whenData((event) {
+        if (event.isNotification) {
+          refreshFromRealtime();
+        }
+      });
+    });
     if (_shouldLoad) {
       load();
     }
@@ -61,6 +71,21 @@ class NotificationsController
   final Ref _ref;
   final NotificationsRepository _repository;
   final bool _shouldLoad;
+  Timer? _pollingTimer;
+
+  void _startPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(
+      const Duration(minutes: 2),
+      (_) => refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> load({bool onlyUnread = false}) async {
     if (!_shouldLoad) {
@@ -78,6 +103,7 @@ class NotificationsController
         ),
       );
       _ref.invalidate(unreadNotificationsCountProvider);
+      _startPolling();
     } catch (error, stackTrace) {
       state = AsyncValue.error(error, stackTrace);
     }
@@ -90,6 +116,11 @@ class NotificationsController
     } catch (_) {
       // best-effort in dev/sandbox
     }
+    await load(onlyUnread: onlyUnread);
+  }
+
+  Future<void> refreshFromRealtime() async {
+    final onlyUnread = state.valueOrNull?.onlyUnread ?? false;
     await load(onlyUnread: onlyUnread);
   }
 

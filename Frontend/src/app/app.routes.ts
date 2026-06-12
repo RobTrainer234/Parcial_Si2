@@ -39,24 +39,10 @@ export const routes: Routes = [
           ),
       },
       {
-        path: 'workshop/profile',
+        path: 'workshop',
         loadComponent: () =>
-          import('./packages/operaciones-taller/pages/workshop-profile.page').then(
-            (m) => m.WorkshopProfilePage,
-          ),
-      },
-      {
-        path: 'workshop/catalog',
-        loadComponent: () =>
-          import('./packages/operaciones-taller/pages/workshop-catalog.page').then(
-            (m) => m.WorkshopCatalogPage,
-          ),
-      },
-      {
-        path: 'workshop/staff',
-        loadComponent: () =>
-          import('./packages/operaciones-taller/pages/workshop-staff.page').then(
-            (m) => m.WorkshopStaffPage,
+          import('./packages/operaciones-taller/pages/workshop-management.page').then(
+            (m) => m.WorkshopManagementPage,
           ),
       },
       {
