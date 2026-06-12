@@ -2388,7 +2388,7 @@ def _get_dashboard_action_items(
 
 def get_workshop_dashboard_overview(
     *,
-    admin_context: WorkshopAdminContext,
+    admin_context: WorkshopAdminContext | WorkshopAccessContext,
     db: Session,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -2530,7 +2530,7 @@ def get_workshop_dashboard_overview(
 
 def create_workshop_dashboard_voice_report(
     *,
-    admin_context: WorkshopAdminContext,
+    admin_context: WorkshopAdminContext | WorkshopAccessContext,
     db: Session,
     audio_file: UploadFile,
     date_from: datetime | None = None,

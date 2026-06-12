@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
@@ -15,6 +17,7 @@ from app.models import (
     Operario,
     OperarioEspecialidad,
     Persona,
+    Taller,
     Usuario,
     Vehiculo,
 )
@@ -23,6 +26,13 @@ from .security import decode_token
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@dataclass(slots=True)
+class TenantScope:
+    role: str
+    tenant_id: int | None
+    workshop_ids: tuple[int, ...] = ()
 
 
 def user_context_query():
@@ -72,11 +82,63 @@ def forbidden_user_error(message: str = "User is not allowed to perform this act
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
 
 
+def _get_taller_tenant_id(taller: Taller | None) -> int | None:
+    if taller is None:
+        return None
+    return taller.id_tenant
+
+
+def resolve_user_tenant_scope(user: Usuario) -> TenantScope:
+    persona = user.persona
+    role = user.tipo_usuario
+
+    if role in ("ADMINISTRADOR", "ADMIN_SUCURSAL"):
+        administrador = persona.administrador if persona is not None else None
+        tenant_id = _get_taller_tenant_id(administrador.taller if administrador is not None else None)
+        workshop_id = administrador.id_taller if administrador is not None else None
+        return TenantScope(
+            role=role,
+            tenant_id=tenant_id,
+            workshop_ids=((workshop_id,) if workshop_id is not None else ()),
+        )
+
+    if role == "OPERARIO":
+        operario = persona.operario if persona is not None else None
+        tenant_id = _get_taller_tenant_id(operario.taller if operario is not None else None)
+        workshop_id = operario.id_taller if operario is not None else None
+        return TenantScope(
+            role=role,
+            tenant_id=tenant_id,
+            workshop_ids=((workshop_id,) if workshop_id is not None else ()),
+        )
+
+    if role == "ADMIN_GERENTE_SUCURSALES":
+        managed_workshops = persona.talleres_gerenciados if persona is not None else []
+        active_taller_ids: list[int] = []
+        tenant_ids: set[int] = set()
+        for managed in managed_workshops:
+            taller = managed.taller
+            if taller is None or not taller.activo:
+                continue
+            active_taller_ids.append(managed.id_taller)
+            if taller.id_tenant is not None:
+                tenant_ids.add(taller.id_tenant)
+        tenant_id = next(iter(tenant_ids)) if len(tenant_ids) == 1 else None
+        return TenantScope(
+            role=role,
+            tenant_id=tenant_id,
+            workshop_ids=tuple(active_taller_ids),
+        )
+
+    return TenantScope(role=role, tenant_id=None, workshop_ids=())
+
+
 def ensure_user_login_allowed(user: Usuario) -> Usuario:
     if not user.activo:
         raise forbidden_user_error("User account is inactive.")
 
     persona = user.persona
+    tenant_scope = resolve_user_tenant_scope(user)
 
     if user.tipo_usuario in ("ADMINISTRADOR", "ADMIN_SUCURSAL"):
         administrador = persona.administrador if persona is not None else None
@@ -84,11 +146,15 @@ def ensure_user_login_allowed(user: Usuario) -> Usuario:
             raise forbidden_user_error("User is not allowed to perform this action.")
         if not administrador.activo or not administrador.taller.activo:
             raise forbidden_user_error("User is not allowed to perform this action.")
+        if tenant_scope.tenant_id is None:
+            raise forbidden_user_error("User workshop is not assigned to a tenant.")
 
     elif user.tipo_usuario == "ADMIN_GERENTE_SUCURSALES":
         talleres_gerenciados = persona.talleres_gerenciados if persona is not None else None
         if not talleres_gerenciados:
             raise forbidden_user_error("User is not allowed to perform this action.")
+        if not tenant_scope.workshop_ids or tenant_scope.tenant_id is None:
+            raise forbidden_user_error("Manager workshops are not provisioned for a single tenant.")
 
     elif user.tipo_usuario == "OPERARIO":
         operario = persona.operario if persona is not None else None
@@ -96,6 +162,8 @@ def ensure_user_login_allowed(user: Usuario) -> Usuario:
             raise forbidden_user_error("User is not allowed to perform this action.")
         if not operario.activo or not operario.taller.activo:
             raise forbidden_user_error("User is not allowed to perform this action.")
+        if tenant_scope.tenant_id is None:
+            raise forbidden_user_error("Operario workshop is not assigned to a tenant.")
 
     return user
 
@@ -130,6 +198,7 @@ def build_actor_context(user: Usuario) -> dict[str, int | None]:
         "operario_id": None,
         "taller_id": None,
         "taller_ids": None,
+        "tenant_id": None,
     }
 
     persona = user.persona
@@ -141,11 +210,15 @@ def build_actor_context(user: Usuario) -> dict[str, int | None]:
     if persona.administrador is not None:
         actor_context["administrador_persona_id"] = persona.administrador.id_persona
         actor_context["taller_id"] = persona.administrador.id_taller
+        actor_context["tenant_id"] = persona.administrador.taller.id_tenant
     if persona.operario is not None:
         actor_context["operario_id"] = persona.operario.id_persona
         actor_context["taller_id"] = persona.operario.id_taller
+        actor_context["tenant_id"] = persona.operario.taller.id_tenant
     if persona.talleres_gerenciados:
-        actor_context["taller_ids"] = [gt.id_taller for gt in persona.talleres_gerenciados]
+        tenant_scope = resolve_user_tenant_scope(user)
+        actor_context["taller_ids"] = list(tenant_scope.workshop_ids)
+        actor_context["tenant_id"] = tenant_scope.tenant_id
 
     return actor_context
 

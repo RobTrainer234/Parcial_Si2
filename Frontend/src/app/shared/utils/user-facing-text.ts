@@ -83,6 +83,18 @@ const BACKEND_MESSAGE_MAP = new Map<string, string>([
     'No pending requests.',
     'No hay solicitudes pendientes.',
   ],
+  [
+    'You do not have access to this workshop.',
+    'No tienes permiso para acceder a esta sucursal.',
+  ],
+  [
+    'Manager has no assigned workshops.',
+    'No tienes permiso para acceder a esta sucursal.',
+  ],
+  [
+    'Manager workshops are not provisioned for a single tenant.',
+    'No tienes permiso para acceder a esta sucursal.',
+  ],
 ]);
 
 const STATUS_LABEL_MAP = new Map<string, string>([
@@ -158,6 +170,12 @@ export function localizeBackendMessage(raw: string | null | undefined): string {
   }
   if (normalized.includes('triage ai returned an invalid response')) {
     return 'No se pudo interpretar la respuesta del diagnostico automatico.';
+  }
+  if (normalized.includes('access to this workshop')) {
+    return 'No tienes permiso para acceder a esta sucursal.';
+  }
+  if (normalized.includes('single tenant')) {
+    return 'No tienes permiso para acceder a esta sucursal.';
   }
 
   return value;

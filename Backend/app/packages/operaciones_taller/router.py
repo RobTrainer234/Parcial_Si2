@@ -103,7 +103,7 @@ def workshop_dashboard_voice_report(
     date_from: datetime | None = Form(default=None),
     date_to: datetime | None = Form(default=None),
     scope: str | None = Form(default="TALLER"),
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> VoiceDashboardReportResponse:
     return create_workshop_dashboard_voice_report(
@@ -527,7 +527,10 @@ def gerente_workshops_list(
     from sqlalchemy import select
 
     workshops = db.scalars(
-        select(Taller).where(Taller.id_taller.in_(gerente_context.taller_ids))
+        select(Taller).where(
+            Taller.id_taller.in_(gerente_context.taller_ids),
+            Taller.id_tenant == gerente_context.tenant_id,
+        )
     ).all()
     return [
         WorkshopSummaryResponse(id_taller=w.id_taller, nombre_comercial=w.nombre_comercial)

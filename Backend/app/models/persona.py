@@ -56,6 +56,21 @@ class Persona(TimestampMixin, Base):
     )
 
 
+class Tenant(TimestampMixin, Base):
+    __tablename__ = "tenant"
+
+    id_tenant: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(150), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    activo: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("TRUE"),
+    )
+
+    talleres: Mapped[list[Taller]] = relationship("Taller", back_populates="tenant")
+
+
 class Taller(TimestampMixin, Base):
     __tablename__ = "taller"
     __table_args__ = (
@@ -68,6 +83,11 @@ class Taller(TimestampMixin, Base):
     )
 
     id_taller: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_tenant: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("tenant.id_tenant", ondelete="RESTRICT"),
+        nullable=False,
+    )
     nombre_comercial: Mapped[str] = mapped_column(String(150), nullable=False)
     descripcion: Mapped[str | None] = mapped_column(Text)
     latitud: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
@@ -99,6 +119,7 @@ class Taller(TimestampMixin, Base):
         server_default=text("0"),
     )
 
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="talleres")
     administradores: Mapped[list[Administrador]] = relationship(
         "Administrador",
         back_populates="taller",
@@ -153,7 +174,7 @@ class Usuario(TimestampMixin, Base):
     )
     email: Mapped[str] = mapped_column(String(150), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    tipo_usuario: Mapped[str] = mapped_column(String(20), nullable=False)
+    tipo_usuario: Mapped[str] = mapped_column(String(40), nullable=False)
     activo: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -400,3 +421,4 @@ class GerenteTaller(CreatedAtMixin, Base):
 
 
 Index("uq_usuario_email_lower", func.lower(Usuario.email), unique=True)
+Index("ix_taller_tenant", Taller.id_tenant)
