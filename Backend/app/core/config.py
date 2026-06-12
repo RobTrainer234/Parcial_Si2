@@ -84,6 +84,15 @@ class Settings:
     payment_request_expire_minutes: int
     push_provider: str
     fcm_credentials_file: Path | None
+    smtp_host: str
+    smtp_port: int
+    smtp_username: str | None
+    smtp_password: str | None
+    smtp_use_tls: bool
+    email_from_address: str
+    email_from_name: str
+    frontend_url: str
+    password_reset_token_expire_minutes: int
     sqlalchemy_echo: bool = False
 
 
@@ -167,6 +176,17 @@ def get_settings() -> Settings:
             Path(fcm_credentials_file)
             if fcm_credentials_file and Path(fcm_credentials_file).is_absolute()
             else (BACKEND_DIR / fcm_credentials_file if fcm_credentials_file else None)
+        ),
+        smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_username=_get_optional_env("SMTP_USERNAME"),
+        smtp_password=_get_optional_env("SMTP_PASSWORD"),
+        smtp_use_tls=_get_bool_env("SMTP_USE_TLS", default=True),
+        email_from_address=os.getenv("EMAIL_FROM_ADDRESS", "noreply@si2taller.com"),
+        email_from_name=os.getenv("EMAIL_FROM_NAME", "SI2 Auxilio"),
+        frontend_url=os.getenv("FRONTEND_URL", "http://127.0.0.1:4200"),
+        password_reset_token_expire_minutes=int(
+            os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30")
         ),
         sqlalchemy_echo=_get_bool_env("SQLALCHEMY_ECHO", default=False),
     )

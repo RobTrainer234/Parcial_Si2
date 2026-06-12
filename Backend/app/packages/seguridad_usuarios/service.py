@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -9,6 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.email import send_reset_password_email
 from app.models import (
     Administrador,
     Cliente,
@@ -17,6 +19,7 @@ from app.models import (
     Marca,
     Modelo,
     OperarioEspecialidad,
+    PasswordResetToken,
     Persona,
     RegistroPendiente,
     Taller,
@@ -34,6 +37,7 @@ from .dependencies import (
 from .schemas import (
     AdminRegisterStartRequest,
     ClientRegisterStartRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
     LogoutResponse,
@@ -48,6 +52,7 @@ from .schemas import (
     RegistrationStartResponse,
     RegistrationVerifyRequest,
     RegistrationVerifyResponse,
+    ResetPasswordRequest,
     SimpleSuccessResponse,
     UserProfileResponse,
     VehicleCreateRequest,
@@ -60,6 +65,7 @@ from .security import (
     create_access_token,
     create_registration_token,
     decode_token,
+    generate_reset_token,
     generate_verification_code,
     hash_password,
     utc_now,
@@ -1089,3 +1095,91 @@ def replace_operario_specialties(
         _serialize_operario_specialty(association)
         for association in _load_operario_specialties(db, persona_id=current_user.id_persona)
     ]
+
+
+def forgot_password(payload: ForgotPasswordRequest, db: Session) -> SimpleSuccessResponse:
+    user = _get_user_by_email(db, payload.email)
+
+    if user is None:
+        return SimpleSuccessResponse(
+            status="ok",
+            message="If the email is registered, you will receive reset instructions.",
+        )
+
+    raw_token, token_hash = generate_reset_token()
+    now = utc_now()
+    expires_at = now + timedelta(minutes=settings.password_reset_token_expire_minutes)
+
+    reset_record = PasswordResetToken(
+        id_usuario=user.id_usuario,
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    db.add(reset_record)
+    db.commit()
+
+    send_reset_password_email(
+        to_email=_normalize_email(payload.email),
+        reset_token=raw_token,
+        frontend_url=settings.frontend_url,
+    )
+
+    return SimpleSuccessResponse(
+        status="ok",
+        message="If the email is registered, you will receive reset instructions.",
+    )
+
+
+def reset_password(payload: ResetPasswordRequest, db: Session) -> SimpleSuccessResponse:
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    now = utc_now()
+
+    reset_record = db.scalar(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.token_hash == token_hash)
+        .with_for_update()
+    )
+
+    if reset_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token.",
+        )
+
+    if reset_record.used_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset token has already been used.",
+        )
+
+    if reset_record.expires_at <= now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token has expired.",
+        )
+
+    user = db.scalar(
+        select(Usuario).where(Usuario.id_usuario == reset_record.id_usuario).with_for_update()
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+    reset_record.used_at = now
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Password could not be reset.",
+        ) from exc
+
+    return SimpleSuccessResponse(
+        status="ok",
+        message="Password has been reset successfully.",
+    )

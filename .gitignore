@@ -73,3 +73,9 @@ PROJECT_MAP.md
 base_de_datos.sql
 
 deploy_backup/
+
+# =========================
+# ENTORNO VIRTUAL LOCAL
+# =========================
+/env/
+/env

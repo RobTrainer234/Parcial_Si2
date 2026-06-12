@@ -3,10 +3,12 @@ from .bitacora import Bitacora
 from .incidente import CatalogoServicioTaller, Incidente, SolicitudServicio
 from .notificacion import DispositivoUsuario, Notificacion
 from .pago import MetodoPago, Pago
+from .password_reset_token import PasswordResetToken
 from .persona import (
     Administrador,
     Cliente,
     Especialidad,
+    GerenteTaller,
     Operario,
     OperarioEspecialidad,
     Persona,
@@ -40,6 +42,7 @@ __all__ = [
     "DispositivoUsuario",
     "Especialidad",
     "Evidencia",
+    "GerenteTaller",
     "Incidente",
     "Marca",
     "MetodoPago",
@@ -47,6 +50,7 @@ __all__ = [
     "Notificacion",
     "Operario",
     "OperarioEspecialidad",
+    "PasswordResetToken",
     "Pago",
     "Persona",
     "RegistroPendiente",

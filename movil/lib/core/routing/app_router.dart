@@ -64,9 +64,11 @@ Widget _invalidEntityPage(
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authControllerProvider);
-  final role = authState.valueOrNull?.role;
-  final homeRoute = AppRoutes.homeForRole(role);
+  final routerRefresh = ValueNotifier<int>(0);
+  ref.onDispose(routerRefresh.dispose);
+  ref.listen<AsyncValue<dynamic>>(authControllerProvider, (_, __) {
+    routerRefresh.value++;
+  });
 
   bool isProtectedRoute(String location) {
     return location.startsWith('/cliente/') ||
@@ -81,7 +83,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   bool isClientOnlyRoute(String location) {
     return location.startsWith('/cliente/') ||
         location.startsWith('/incident/') ||
-        location.startsWith('/notifications') ||
         location.startsWith('/services/');
   }
 
@@ -103,6 +104,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: AppRoutes.splash,
+    refreshListenable: routerRefresh,
     routes: [
       GoRoute(
         path: AppRoutes.splash,
@@ -164,12 +166,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/incident/:incidentId/diagnosis',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'incidentId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Incidente',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return IncidentDiagnosisPage(incidentId: id);
@@ -178,12 +181,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/incident/:incidentId/matchmaking',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'incidentId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Incidente',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return IncidentMatchmakingPage(incidentId: id);
@@ -192,12 +196,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/incident/:incidentId/recommendations',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'incidentId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Incidente',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return WorkshopRecommendationsPage(incidentId: id);
@@ -206,12 +211,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/incident/:incidentId/request-sent',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'incidentId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Incidente',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           final result = state.extra as HireWorkshopResponseModel?;
@@ -221,12 +227,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/services/:serviceId/tracking',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'serviceId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Servicio',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return ServiceTrackingPage(serviceId: id);
@@ -235,12 +242,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/services/:serviceId/prequotation',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'serviceId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Servicio',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return ServicePrequotationPage(serviceId: id);
@@ -249,12 +257,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/services/:serviceId/finalization',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'serviceId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Servicio',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return ServiceFinalizationPage(serviceId: id);
@@ -263,12 +272,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/services/:serviceId/payment',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'serviceId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Servicio',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return ServicePaymentPage(serviceId: id);
@@ -277,12 +287,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/services/:serviceId/rating',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'serviceId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Servicio',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return ServiceRatingPage(serviceId: id);
@@ -291,12 +302,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/operario/services/:serviceId',
         builder: (context, state) {
+          final role = ref.read(authControllerProvider).valueOrNull?.role;
           final id = _parsePositiveParam(state, 'serviceId');
           if (id == null) {
             return _invalidEntityPage(
               context,
               'Servicio',
-              homeRoute: homeRoute,
+              homeRoute: AppRoutes.homeForRole(role),
             );
           }
           return OperatorServiceDetailPage(serviceId: id);
@@ -304,6 +316,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
     redirect: (context, state) {
+      final authState = ref.read(authControllerProvider);
+      final role = authState.valueOrNull?.role;
+      final homeRoute = AppRoutes.homeForRole(role);
       final location = state.matchedLocation;
       final isLoading = authState.isLoading;
       final isAuthenticated = authState.valueOrNull?.isAuthenticated == true;

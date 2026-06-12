@@ -34,6 +34,16 @@ from app.models import (
     TallerEspecialidad,
     Usuario,
 )
+from app.packages.gestion_auxilio.notification_types import (
+    NOTIFICATION_TYPE_OPERARIO_ASIGNADO,
+    NOTIFICATION_TYPE_OPERARIO_EN_CAMINO,
+    NOTIFICATION_TYPE_SOLICITUD_ACEPTADA,
+)
+from app.packages.gestion_auxilio.service import (
+    _auto_dispatch_notifications,
+    _create_typed_notification,
+)
+from app.packages.operaciones_taller.schemas import WorkshopActiveServiceTrackingSummary
 from app.packages.seguridad_usuarios.security import hash_password
 from app.packages.inteligencia_triaje.matchmaking import build_ranked_candidate
 from app.packages.inteligencia_triaje.diagnosis_utils import (
@@ -4116,35 +4126,33 @@ def assign_operario_to_service(
         )
     )
 
-    _create_operario_notification(
+    _create_typed_notification(
         db=db,
-        operario_user=operario_user,
-        service=service,
+        user=operario_user,
+        notification_type=NOTIFICATION_TYPE_OPERARIO_ASIGNADO,
         title="Nuevo servicio asignado",
         message=(
             f"Se te asigno el servicio {service.id_servicio} para el incidente "
             f"{incident.id_incidente}."
         ),
-        payload={
-            "service_id": service.id_servicio,
-            "incident_id": incident.id_incidente,
+        service=service,
+        incident_id=incident.id_incidente,
+        extra_payload={
             "detected_specialty": incident.especialidad_detectada.nombre,
             "ai_summary": incident.diagnostico_ia_resumen,
         },
     )
-    _create_client_notification(
+    _create_typed_notification(
         db=db,
-        client_user=client_user,
-        request_row=service.solicitud,
+        user=client_user,
+        notification_type=NOTIFICATION_TYPE_OPERARIO_ASIGNADO,
         title="Operario asignado",
         message="Un operario fue asignado a tu caso y el servicio sigue avanzando.",
-        payload={
-            "service_id": service.id_servicio,
-            "incident_id": incident.id_incidente,
+        service=service,
+        incident_id=incident.id_incidente,
+        extra_payload={
             "operario_id": operario.id_persona,
-            "service_state": service.estado,
         },
-        service_id=service.id_servicio,
     )
 
     try:
@@ -4161,6 +4169,8 @@ def assign_operario_to_service(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Operario could not be assigned to the service.",
         ) from exc
+
+    _auto_dispatch_notifications(target_user=operario_user, db=db)
 
     refreshed_service = _get_workshop_service(
         db=db,
@@ -4323,30 +4333,42 @@ def _accept_workshop_request(
             )
         )
 
-    _create_client_notification(
+    _create_typed_notification(
         db=db,
-        client_user=client_user,
-        request_row=request_row,
+        user=client_user,
+        notification_type=NOTIFICATION_TYPE_SOLICITUD_ACEPTADA,
         title="Solicitud aceptada",
         message=(
             f"El taller {request_row.taller.nombre_comercial} acepto tu solicitud. "
             "El servicio quedo en espera de asignacion de operario. "
             "La precotizacion es referencial antes del diagnostico fisico."
         ),
-        payload={
-            "incident_id": request_row.id_incidente,
-            "request_id": request_row.id_solicitud,
-            "service_id": service.id_servicio,
-            "service_state": service.estado,
+        service=service,
+        incident_id=request_row.id_incidente,
+        extra_payload={
             "codigo_precotizacion": service.codigo_precotizacion,
-            "monto_precotizado_min": str(service.monto_precotizado_min),
-            "monto_precotizado_max": str(service.monto_precotizado_max),
+            "monto_precotizado_min": str(service.monto_precotizado_min) if service.monto_precotizado_min is not None else None,
+            "monto_precotizado_max": str(service.monto_precotizado_max) if service.monto_precotizado_max is not None else None,
             "currency": PREQUOTATION_CURRENCY,
             "catalog_service_name": selected_catalog.nombre,
             "incluye_repuestos_basicos": selected_catalog.incluye_repuestos_basicos,
         },
-        service_id=service.id_servicio,
     )
+
+    for admin_user in _get_workshop_admin_users(db, workshop_id=request_row.id_taller):
+        _create_typed_notification(
+            db=db,
+            user=admin_user,
+            notification_type=NOTIFICATION_TYPE_SOLICITUD_ACEPTADA,
+            title="Solicitud aceptada",
+            message=(
+                f"La solicitud {request_row.id_solicitud} para el taller "
+                f"{request_row.taller.nombre_comercial} fue aceptada y el servicio "
+                f"{service.id_servicio} quedo en espera de asignacion de operario."
+            ),
+            service=service,
+            incident_id=request_row.id_incidente,
+        )
 
     try:
         db.commit()
@@ -4362,6 +4384,8 @@ def _accept_workshop_request(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Workshop request could not be accepted.",
         ) from exc
+
+    _auto_dispatch_notifications(target_user=client_user, db=db)
 
     refreshed_request = _get_workshop_request(
         db=db,
@@ -4553,3 +4577,108 @@ def decide_workshop_request(
         ip_origen=ip_origen,
         user_agent=user_agent,
     )
+
+
+_TRACKING_STATES = ("ASIGNADO", "EN_CAMINO", "EN_SITIO", "EN_DIAGNOSTICO_FISICO")
+
+
+def get_workshop_active_tracking(
+    workshop_ids: tuple[int, ...],
+    db: Session,
+) -> list[WorkshopActiveServiceTrackingSummary]:
+    from sqlalchemy import select, func as sa_func, text
+
+    latest_location_subq = (
+        select(
+            ServicioUbicacion.id_servicio,
+            sa_func.max(ServicioUbicacion.fecha_hora).label("max_fecha"),
+        )
+        .group_by(ServicioUbicacion.id_servicio)
+        .subquery()
+    )
+
+    active_services = (
+        select(
+            Servicio,
+            Taller.nombre_comercial,
+            Persona.nombre.label("operario_nombre"),
+            Persona.apellido.label("operario_apellido"),
+            ServicioUbicacion.latitud.label("last_lat"),
+            ServicioUbicacion.longitud.label("last_lng"),
+            ServicioUbicacion.fecha_hora.label("last_location_at"),
+            ServicioUbicacion.ruta_distancia_metros,
+            ServicioUbicacion.ruta_duracion_segundos,
+            Incidente.latitud.label("incident_lat"),
+            Incidente.longitud.label("incident_lng"),
+            Incidente.id_incidente,
+            Especialidad.nombre.label("detected_specialty"),
+        )
+        .join(SolicitudServicio, SolicitudServicio.id_solicitud == Servicio.id_solicitud)
+        .join(Taller, Taller.id_taller == SolicitudServicio.id_taller)
+        .join(Incidente, Incidente.id_incidente == SolicitudServicio.id_incidente)
+        .outerjoin(Operario, Operario.id_persona == Servicio.id_persona_operario)
+        .outerjoin(Persona, Persona.id_persona == Operario.id_persona)
+        .outerjoin(
+            Especialidad,
+            Especialidad.id_especialidad == Incidente.id_especialidad_detectada,
+        )
+        .outerjoin(
+            latest_location_subq,
+            latest_location_subq.c.id_servicio == Servicio.id_servicio,
+        )
+        .outerjoin(
+            ServicioUbicacion,
+            sa_func.and_(
+                ServicioUbicacion.id_servicio == latest_location_subq.c.id_servicio,
+                ServicioUbicacion.fecha_hora == latest_location_subq.c.max_fecha,
+            ),
+        )
+        .where(
+            Taller.id_taller.in_(workshop_ids),
+            Servicio.estado.in_(_TRACKING_STATES),
+        )
+        .order_by(Servicio.fecha_asignacion_operario.desc().nullslast(), Servicio.id_servicio.desc())
+    )
+
+    rows = db.execute(active_services).all()
+    now = utc_now()
+    threshold = timedelta(seconds=300)
+
+    result: list[WorkshopActiveServiceTrackingSummary] = []
+    for r in rows:
+        last_at = r.last_location_at
+        has_live = last_at is not None and (now - last_at) < threshold
+        eta_text = None
+        if r.ruta_duracion_segundos is not None:
+            total_sec = int(r.ruta_duracion_segundos)
+            h = total_sec // 3600
+            m = (total_sec % 3600) // 60
+            if h > 0:
+                eta_text = f"{h}h {m}min"
+            else:
+                eta_text = f"{m}min"
+        operario_full = None
+        if r.operario_nombre and r.operario_apellido:
+            operario_full = f"{r.operario_nombre} {r.operario_apellido}"
+
+        result.append(
+            WorkshopActiveServiceTrackingSummary(
+                service_id=r.id_servicio,
+                service_state=r.estado,
+                incident_id=r.id_incidente,
+                incident_latitud=r.incident_lat,
+                incident_longitud=r.incident_lng,
+                workshop_name=r.nombre_comercial,
+                operario_name=operario_full,
+                last_operario_latitud=r.last_lat,
+                last_operario_longitud=r.last_lng,
+                last_location_at=last_at,
+                has_live_location=has_live,
+                current_distance_meters=r.ruta_distancia_metros,
+                eta_text=eta_text,
+                detected_specialty=r.detected_specialty,
+                assigned_at=r.fecha_asignacion_operario,
+            )
+        )
+
+    return result

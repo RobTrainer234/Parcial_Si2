@@ -44,4 +44,8 @@ class NotificationsRepository {
   Future<void> dispatchPending() async {
     await _apiClient.post('/notifications/me/dispatch-pending');
   }
+
+  Future<void> markAllAsRead() async {
+    await _apiClient.patch('/notifications/mark-all-read');
+  }
 }

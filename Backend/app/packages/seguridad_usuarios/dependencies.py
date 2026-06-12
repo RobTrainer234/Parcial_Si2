@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.models import (
     Administrador,
     Cliente,
+    GerenteTaller,
     Modelo,
     Operario,
     OperarioEspecialidad,
@@ -33,6 +34,9 @@ def user_context_query():
         .joinedload(Persona.operario)
         .joinedload(Operario.taller),
         joinedload(Usuario.persona).joinedload(Persona.cliente),
+        joinedload(Usuario.persona)
+        .selectinload(Persona.talleres_gerenciados)
+        .joinedload(GerenteTaller.taller),
     )
 
 
@@ -44,6 +48,10 @@ def profile_context_query():
         joinedload(Usuario.persona)
         .joinedload(Persona.operario)
         .joinedload(Operario.taller),
+        joinedload(Usuario.persona).joinedload(Persona.cliente),
+        joinedload(Usuario.persona)
+        .selectinload(Persona.talleres_gerenciados)
+        .joinedload(GerenteTaller.taller),
         joinedload(Usuario.persona)
         .joinedload(Persona.cliente)
         .selectinload(Cliente.vehiculos)
@@ -69,12 +77,19 @@ def ensure_user_login_allowed(user: Usuario) -> Usuario:
         raise forbidden_user_error("User account is inactive.")
 
     persona = user.persona
-    if user.tipo_usuario == "ADMINISTRADOR":
+
+    if user.tipo_usuario in ("ADMINISTRADOR", "ADMIN_SUCURSAL"):
         administrador = persona.administrador if persona is not None else None
         if administrador is None or administrador.taller is None:
             raise forbidden_user_error("User is not allowed to perform this action.")
         if not administrador.activo or not administrador.taller.activo:
             raise forbidden_user_error("User is not allowed to perform this action.")
+
+    elif user.tipo_usuario == "ADMIN_GERENTE_SUCURSALES":
+        talleres_gerenciados = persona.talleres_gerenciados if persona is not None else None
+        if not talleres_gerenciados:
+            raise forbidden_user_error("User is not allowed to perform this action.")
+
     elif user.tipo_usuario == "OPERARIO":
         operario = persona.operario if persona is not None else None
         if operario is None or operario.taller is None:
@@ -87,7 +102,8 @@ def ensure_user_login_allowed(user: Usuario) -> Usuario:
 
 def ensure_profile_access_allowed(user: Usuario) -> Usuario:
     ensure_user_login_allowed(user)
-    if user.tipo_usuario not in {"CLIENTE", "OPERARIO", "ADMINISTRADOR"}:
+    allowed_roles = {"CLIENTE", "OPERARIO", "ADMINISTRADOR", "ADMIN_SUCURSAL", "ADMIN_GERENTE_SUCURSALES"}
+    if user.tipo_usuario not in allowed_roles:
         raise forbidden_user_error("This profile endpoint is not available for the current role.")
 
     persona = user.persona
@@ -95,10 +111,14 @@ def ensure_profile_access_allowed(user: Usuario) -> Usuario:
         raise forbidden_user_error("Client profile is not provisioned.")
     if user.tipo_usuario == "OPERARIO" and (persona is None or persona.operario is None):
         raise forbidden_user_error("Operario profile is not provisioned.")
-    if user.tipo_usuario == "ADMINISTRADOR" and (
+    if user.tipo_usuario in ("ADMINISTRADOR", "ADMIN_SUCURSAL") and (
         persona is None or persona.administrador is None or persona.administrador.taller is None
     ):
         raise forbidden_user_error("Administrator profile is not provisioned.")
+    if user.tipo_usuario == "ADMIN_GERENTE_SUCURSALES" and (
+        persona is None or not persona.talleres_gerenciados
+    ):
+        raise forbidden_user_error("Manager profile is not provisioned.")
 
     return user
 
@@ -109,6 +129,7 @@ def build_actor_context(user: Usuario) -> dict[str, int | None]:
         "administrador_persona_id": None,
         "operario_id": None,
         "taller_id": None,
+        "taller_ids": None,
     }
 
     persona = user.persona
@@ -123,6 +144,8 @@ def build_actor_context(user: Usuario) -> dict[str, int | None]:
     if persona.operario is not None:
         actor_context["operario_id"] = persona.operario.id_persona
         actor_context["taller_id"] = persona.operario.id_taller
+    if persona.talleres_gerenciados:
+        actor_context["taller_ids"] = [gt.id_taller for gt in persona.talleres_gerenciados]
 
     return actor_context
 
@@ -131,6 +154,8 @@ def build_home_hint(role: str) -> str:
     mapping = {
         "CLIENTE": "mobile_client_dashboard",
         "ADMINISTRADOR": "web_admin_dashboard",
+        "ADMIN_SUCURSAL": "web_admin_dashboard",
+        "ADMIN_GERENTE_SUCURSALES": "web_admin_dashboard",
         "OPERARIO": "mobile_operario_dashboard",
         "SUPER_ADMIN": "admin_global_dashboard",
     }

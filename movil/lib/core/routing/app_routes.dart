@@ -46,8 +46,12 @@ class AppRoutes {
 
   static bool isOperatorRole(String? role) => normalizeRole(role) == 'OPERARIO';
 
-  static bool isAdminRole(String? role) =>
-      normalizeRole(role) == 'ADMINISTRADOR';
+  static bool isAdminRole(String? role) {
+    final normalized = normalizeRole(role);
+    return normalized == 'ADMINISTRADOR' ||
+        normalized == 'ADMIN_SUCURSAL' ||
+        normalized == 'ADMIN_GERENTE_SUCURSALES';
+  }
 
   static String homeForRole(String? role) {
     if (isOperatorRole(role)) {

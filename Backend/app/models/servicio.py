@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedAtMixin, TimestampMixin
@@ -248,6 +249,13 @@ class ServicioUbicacion(Base):
         nullable=False,
         server_default=text("NOW()"),
     )
+    ruta_origen_latitud: Mapped[Decimal | None] = mapped_column(Numeric(10, 8))
+    ruta_origen_longitud: Mapped[Decimal | None] = mapped_column(Numeric(11, 8))
+    ruta_destino_latitud: Mapped[Decimal | None] = mapped_column(Numeric(10, 8))
+    ruta_destino_longitud: Mapped[Decimal | None] = mapped_column(Numeric(11, 8))
+    ruta_distancia_metros: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    ruta_duracion_segundos: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    ruta_geometria: Mapped[dict[str, object] | list[object] | str | None] = mapped_column(JSONB)
 
     servicio: Mapped[Servicio] = relationship("Servicio", back_populates="ubicaciones")
     operario: Mapped[Operario] = relationship("Operario", back_populates="ubicaciones_servicio")

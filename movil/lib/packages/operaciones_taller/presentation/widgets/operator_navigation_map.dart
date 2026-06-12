@@ -7,9 +7,12 @@ class OperatorNavigationMap extends StatelessWidget {
     super.key,
     required this.incidentLatitud,
     required this.incidentLongitud,
-    required this.operarioLatitud,
-    required this.operarioLongitud,
-    required this.lastLocationAt,
+    this.operarioLatitud,
+    this.operarioLongitud,
+    this.lastLocationAt,
+    this.routePoints,
+    this.routeDistanceMeters,
+    this.routeDurationSeconds,
   });
 
   final double? incidentLatitud;
@@ -17,6 +20,9 @@ class OperatorNavigationMap extends StatelessWidget {
   final double? operarioLatitud;
   final double? operarioLongitud;
   final DateTime? lastLocationAt;
+  final List<LatLng>? routePoints;
+  final double? routeDistanceMeters;
+  final double? routeDurationSeconds;
 
   @override
   Widget build(BuildContext context) {
@@ -41,9 +47,52 @@ class OperatorNavigationMap extends StatelessWidget {
     }
 
     final operarioPoint = _toLatLng(operarioLatitud, operarioLongitud);
-    final points = <LatLng>[
+    final hasRoute = routePoints != null && routePoints!.length >= 2;
+    final allPoints = <LatLng>[
+      ...?routePoints,
       incidentPoint,
       if (operarioPoint != null) operarioPoint,
+    ];
+    final center = _computeCenter(allPoints);
+    final zoom = operarioPoint != null ? 13.5 : 14.5;
+
+    final polylines = <Polyline>[
+      if (hasRoute)
+        Polyline(
+          points: routePoints!,
+          strokeWidth: 4,
+          color: Colors.blue.shade600,
+        )
+      else if (operarioPoint != null)
+        Polyline(
+          points: [operarioPoint, incidentPoint],
+          strokeWidth: 4,
+          color: Colors.blue.shade600,
+        ),
+    ];
+
+    final markers = <Marker>[
+      Marker(
+        point: incidentPoint,
+        width: 56,
+        height: 56,
+        child: _MarkerBubble(
+          icon: Icons.location_on,
+          color: Colors.red.shade600,
+          label: 'Ubicacion del incidente',
+        ),
+      ),
+      if (operarioPoint != null)
+        Marker(
+          point: operarioPoint,
+          width: 56,
+          height: 56,
+          child: _MarkerBubble(
+            icon: Icons.local_shipping,
+            color: Colors.green.shade700,
+            label: 'Tu ubicacion actual',
+          ),
+        ),
     ];
 
     return Card(
@@ -64,6 +113,17 @@ class OperatorNavigationMap extends StatelessWidget {
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
+            if (hasRoute && routeDistanceMeters != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Ruta: ${(routeDistanceMeters! / 1000).toStringAsFixed(1)} km'
+                '${routeDurationSeconds != null ? " · ${_formatDuration(routeDurationSeconds!)}" : ""}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
             const SizedBox(height: 12),
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
@@ -73,8 +133,8 @@ class OperatorNavigationMap extends StatelessWidget {
                   children: [
                     FlutterMap(
                       options: MapOptions(
-                        initialCenter: _computeCenter(points),
-                        initialZoom: operarioPoint != null ? 13.5 : 14.5,
+                        initialCenter: center,
+                        initialZoom: zoom,
                       ),
                       children: [
                         TileLayer(
@@ -82,41 +142,8 @@ class OperatorNavigationMap extends StatelessWidget {
                               'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'si2.auxilio_vial',
                         ),
-                        if (operarioPoint != null)
-                          PolylineLayer(
-                            polylines: [
-                              Polyline(
-                                points: [operarioPoint, incidentPoint],
-                                strokeWidth: 4,
-                                color: Colors.blue.shade600,
-                              ),
-                            ],
-                          ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: incidentPoint,
-                              width: 56,
-                              height: 56,
-                              child: _MarkerBubble(
-                                icon: Icons.location_on,
-                                color: Colors.red.shade600,
-                                label: 'Ubicacion del incidente',
-                              ),
-                            ),
-                            if (operarioPoint != null)
-                              Marker(
-                                point: operarioPoint,
-                                width: 56,
-                                height: 56,
-                                child: _MarkerBubble(
-                                  icon: Icons.local_shipping,
-                                  color: Colors.green.shade700,
-                                  label: 'Tu ubicacion actual',
-                                ),
-                              ),
-                          ],
-                        ),
+                        PolylineLayer(polylines: polylines),
+                        MarkerLayer(markers: markers),
                       ],
                     ),
                     Positioned(
@@ -171,6 +198,17 @@ LatLng _computeCenter(List<LatLng> points) {
   final totalLng =
       points.fold<double>(0, (sum, point) => sum + point.longitude);
   return LatLng(totalLat / points.length, totalLng / points.length);
+}
+
+String _formatDuration(double seconds) {
+  final totalMinutes = (seconds / 60).round();
+  if (totalMinutes < 60) {
+    return '$totalMinutes min';
+  }
+  final hours = totalMinutes ~/ 60;
+  final minutes = totalMinutes % 60;
+  if (minutes == 0) return '${hours}h';
+  return '${hours}h ${minutes}min';
 }
 
 String _formatDate(DateTime? value) {

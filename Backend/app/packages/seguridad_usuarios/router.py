@@ -14,6 +14,7 @@ from .dependencies import (
 from .schemas import (
     AdminRegisterStartRequest,
     ClientRegisterStartRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
     LogoutResponse,
@@ -24,6 +25,7 @@ from .schemas import (
     RegistrationStartResponse,
     RegistrationVerifyRequest,
     RegistrationVerifyResponse,
+    ResetPasswordRequest,
     SimpleSuccessResponse,
     UserProfileResponse,
     VehicleCreateRequest,
@@ -33,6 +35,7 @@ from .schemas import (
 from .service import (
     create_client_vehicle,
     delete_client_vehicle,
+    forgot_password,
     get_me,
     get_profile_me,
     list_client_vehicles,
@@ -40,6 +43,7 @@ from .service import (
     login_user,
     logout_user,
     replace_operario_specialties,
+    reset_password,
     start_admin_registration,
     start_client_registration,
     update_client_vehicle,
@@ -99,6 +103,22 @@ def register_admin_verify(
     db: Session = Depends(get_db),
 ) -> RegistrationVerifyResponse:
     return verify_admin_registration(payload, db)
+
+
+@auth_router.post("/forgot-password", response_model=SimpleSuccessResponse)
+def forgot_password_endpoint(
+    payload: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+) -> SimpleSuccessResponse:
+    return forgot_password(payload, db)
+
+
+@auth_router.post("/reset-password", response_model=SimpleSuccessResponse)
+def reset_password_endpoint(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+) -> SimpleSuccessResponse:
+    return reset_password(payload, db)
 
 
 @profile_router.get("/me", response_model=ProfileMeResponse)

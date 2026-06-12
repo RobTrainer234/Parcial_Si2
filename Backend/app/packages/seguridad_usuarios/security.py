@@ -101,6 +101,13 @@ def generate_verification_code(length: int = 6) -> str:
     return f"{secrets.randbelow(upper_bound):0{length}d}"
 
 
+def generate_reset_token() -> tuple[str, str]:
+    """Returns (raw_token, token_hash)."""
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    return raw_token, token_hash
+
+
 def build_verification_code_digest(code: str) -> str:
     return hmac.new(
         settings.jwt_secret_key.encode("utf-8"),

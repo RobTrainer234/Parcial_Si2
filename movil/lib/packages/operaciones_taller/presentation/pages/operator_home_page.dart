@@ -138,6 +138,11 @@ class _OperatorHeaderActions extends ConsumerWidget {
             children: [
               const AppThemeToggleButton(),
               IconButton(
+                tooltip: 'Notificaciones',
+                onPressed: () => context.push(AppRoutes.notifications),
+                icon: const Icon(Icons.notifications_outlined),
+              ),
+              IconButton(
                 tooltip: 'Actualizar',
                 onPressed: () =>
                     ref.read(operatorServicesProvider.notifier).refresh(),

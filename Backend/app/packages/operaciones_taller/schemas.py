@@ -643,3 +643,21 @@ class VoiceDashboardReportResponse(BaseModel):
 WorkshopDashboardOperationsResponse.model_rebuild()
 WorkshopDashboardFinancialResponse.model_rebuild()
 WorkshopDashboardOperarioResponse.model_rebuild()
+
+
+class WorkshopActiveServiceTrackingSummary(BaseModel):
+    service_id: int
+    service_state: str
+    incident_id: int
+    incident_latitud: Decimal
+    incident_longitud: Decimal
+    workshop_name: str
+    operario_name: str | None = None
+    last_operario_latitud: Decimal | None = None
+    last_operario_longitud: Decimal | None = None
+    last_location_at: datetime | None = None
+    has_live_location: bool = False
+    current_distance_meters: Decimal | None = None
+    eta_text: str | None = None
+    detected_specialty: str | None = None
+    assigned_at: datetime | None = None

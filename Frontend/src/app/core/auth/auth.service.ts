@@ -1,5 +1,8 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
+
+const ADMIN_ROLES = ['ADMINISTRADOR', 'ADMIN_SUCURSAL'];
+const ADMIN_PANEL_ROLES = ['ADMINISTRADOR', 'ADMIN_SUCURSAL', 'ADMIN_GERENTE_SUCURSALES'];
 import { firstValueFrom } from 'rxjs';
 
 import { buildApiUrl } from '../config/api.config';
@@ -34,7 +37,7 @@ export class AuthService {
     }
 
     const resolvedRole = this.resolveRole(response.user, response.role);
-    if (resolvedRole !== 'ADMINISTRADOR') {
+    if (!ADMIN_PANEL_ROLES.includes(resolvedRole)) {
       this.clearSession();
       throw new Error('Solo los usuarios administradores pueden ingresar al panel de taller.');
     }
@@ -120,7 +123,23 @@ export class AuthService {
   }
 
   isAdmin(): boolean {
-    return this.resolveRole(this.currentUser(), this.currentUser()?.role) === 'ADMINISTRADOR';
+    return ADMIN_ROLES.includes(this.resolveRole(this.currentUser(), this.currentUser()?.role));
+  }
+
+  isGerente(): boolean {
+    return this.resolveRole(this.currentUser(), this.currentUser()?.role) === 'ADMIN_GERENTE_SUCURSALES';
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    await firstValueFrom(
+      this.http.post(buildApiUrl('/auth/forgot-password'), { email }),
+    );
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    await firstValueFrom(
+      this.http.post(buildApiUrl('/auth/reset-password'), { token, new_password: newPassword }),
+    );
   }
 
   logout(): void {

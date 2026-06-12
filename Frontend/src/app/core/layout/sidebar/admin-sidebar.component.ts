@@ -1,6 +1,17 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { HttpClient } from '@angular/common/http';
 import { RouterLink, RouterLinkActive } from '@angular/router';
+
+import { AuthService } from '../../auth/auth.service';
+import { WorkshopSelectionService } from '../../auth/workshop-selection.service';
+import { buildApiUrl } from '../../config/api.config';
+
+interface WorkshopOption {
+  id_taller: number;
+  nombre_comercial: string;
+}
 
 @Component({
   selector: 'app-admin-sidebar',
@@ -16,6 +27,23 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
           Gestiona solicitudes, operarios, servicios, auditoría y notificaciones del taller.
         </p>
       </div>
+
+      @if (isGerente()) {
+        <div class="sidebar__workshop-selector">
+          <label for="workshop-select" class="sidebar__selector-label">Sucursal activa</label>
+          <select
+            id="workshop-select"
+            class="sidebar__select"
+            [value]="selectedWorkshopId() ?? ''"
+            (change)="onWorkshopChange($event)"
+          >
+            <option value="" disabled>Seleccione una sucursal</option>
+            @for (ws of workshops(); track ws.id_taller) {
+              <option [value]="ws.id_taller">{{ ws.nombre_comercial }}</option>
+            }
+          </select>
+        </div>
+      }
 
       <nav class="sidebar__nav" aria-label="Navegación principal del taller">
         @for (item of navItems; track item.path) {
@@ -74,6 +102,35 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
         line-height: 1.55;
       }
 
+      .sidebar__workshop-selector {
+        padding: var(--space-4) var(--space-6);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+      }
+
+      .sidebar__selector-label {
+        display: block;
+        margin-bottom: 0.4rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--color-text-muted);
+      }
+
+      .sidebar__select {
+        width: 100%;
+        padding: 0.55rem 0.6rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-elevated);
+        color: var(--color-text);
+        font-size: 0.85rem;
+        font-family: inherit;
+        cursor: pointer;
+      }
+
       .sidebar__nav {
         display: flex;
         flex-direction: column;
@@ -120,6 +177,15 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
   ],
 })
 export class AdminSidebarComponent {
+  private readonly authService = inject(AuthService);
+  private readonly workshopSelection = inject(WorkshopSelectionService);
+  private readonly http = inject(HttpClient);
+  private readonly destroyRef = inject(DestroyRef);
+
+  protected readonly isGerente = computed(() => this.authService.isGerente());
+  protected readonly selectedWorkshopId = this.workshopSelection.selectedWorkshopId;
+  protected readonly workshops = signal<WorkshopOption[]>([]);
+
   protected readonly navItems: Array<{
     label: string;
     path: string;
@@ -136,4 +202,31 @@ export class AdminSidebarComponent {
     { label: 'Auditoría', path: '/admin/audit' },
     { label: 'Notificaciones', path: '/admin/notifications' },
   ];
+
+  protected onWorkshopChange(event: Event): void {
+    const select = event.target as HTMLSelectElement;
+    const value = select.value;
+    this.workshopSelection.selectWorkshop(value ? Number(value) : null);
+  }
+
+  constructor() {
+    if (this.authService.isGerente()) {
+      this.loadWorkshops();
+    }
+  }
+
+  private loadWorkshops(): void {
+    this.http
+      .get<WorkshopOption[]>(buildApiUrl('/workshop/gerente/workshops'))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.workshops.set(data);
+          const currentId = this.selectedWorkshopId();
+          if (currentId !== null && !data.some((w) => w.id_taller === currentId)) {
+            this.workshopSelection.selectWorkshop(null);
+          }
+        },
+      });
+  }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -37,6 +38,10 @@ from app.packages.inteligencia_triaje.matchmaking import haversine_distance_km
 from app.packages.seguridad_usuarios.security import utc_now
 
 from .maps_provider import RouteProviderError, get_route
+from .notification_types import (
+    NOTIFICATION_TYPE_OPERARIO_EN_CAMINO,
+    build_notification_route,
+)
 from .push_provider import PushProviderError, send_push_notification
 from .schemas import (
     ClientActiveServiceSummaryResponse,
@@ -56,6 +61,7 @@ from .schemas import (
     HireWorkshopResponse,
     IncidentDiagnosisSummaryResponse,
     IncidentRecommendationsResponse,
+    MarkAllReadResponse,
     RecommendedWorkshopResponse,
     ServicePrequotationResponse,
     NotificationInboxItem,
@@ -74,6 +80,7 @@ from .schemas import (
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 NAVIGATION_START_ALLOWED_STATES = {"ASIGNADO", "EN_CAMINO"}
 NAVIGATION_STATUS_ALLOWED_STATES = {
     "ASIGNADO",
@@ -384,6 +391,7 @@ def _persist_location_point(
     accuracy_meters: Decimal | None,
     speed_mps: Decimal | None,
     device_timestamp,
+    route_data: dict[str, object] | None = None,
 ) -> ServicioUbicacion:
     location = ServicioUbicacion(
         id_servicio=service.id_servicio,
@@ -396,6 +404,14 @@ def _persist_location_point(
         ),
         fecha_hora=device_timestamp or utc_now(),
     )
+    if route_data:
+        location.ruta_origen_latitud = route_data.get("origin_lat")
+        location.ruta_origen_longitud = route_data.get("origin_lon")
+        location.ruta_destino_latitud = route_data.get("dest_lat")
+        location.ruta_destino_longitud = route_data.get("dest_lon")
+        location.ruta_distancia_metros = route_data.get("distance_meters")
+        location.ruta_duracion_segundos = route_data.get("duration_seconds")
+        location.ruta_geometria = route_data.get("geometry")
     db.add(location)
     db.flush()
     return location
@@ -521,6 +537,115 @@ def _create_notification_bitacora(
     )
 
 
+def _create_typed_notification(
+    *,
+    db: Session,
+    user: Usuario,
+    notification_type: str,
+    title: str,
+    message: str,
+    service: Servicio | None = None,
+    request_id: int | None = None,
+    incident_id: int | None = None,
+    extra_payload: dict[str, object] | None = None,
+    canal: str = "PUSH",
+) -> Notificacion:
+    entity_type: str | None = None
+    entity_id: int | None = None
+    if service is not None:
+        entity_type = "servicio"
+        entity_id = service.id_servicio
+        if request_id is None:
+            request_id = service.id_solicitud
+    elif request_id is not None:
+        entity_type = "solicitud"
+        entity_id = request_id
+
+    payload: dict[str, object] = {
+        "type": notification_type,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+    }
+    if extra_payload:
+        for k, v in extra_payload.items():
+            if k not in payload:
+                payload[k] = v
+    if service is not None:
+        payload.setdefault("service_id", service.id_servicio)
+        payload.setdefault("service_state", service.estado)
+
+    payload["route_suggested"] = build_notification_route(
+        notification_type=notification_type,
+        service_id=entity_id if entity_type == "servicio" else None,
+        incident_id=incident_id,
+        request_id=request_id,
+        user_tipo=user.tipo_usuario,
+    )
+
+    notification = Notificacion(
+        id_usuario=user.id_usuario,
+        id_servicio=service.id_servicio if service is not None else None,
+        id_solicitud=request_id,
+        canal=canal,
+        titulo=title,
+        mensaje=message,
+        payload=payload,
+        estado="PENDIENTE",
+    )
+    db.add(notification)
+    return notification
+
+
+def _auto_dispatch_notifications(
+    *,
+    target_user: Usuario,
+    db: Session,
+) -> None:
+    try:
+        devices = _get_active_user_devices(db, user_id=target_user.id_usuario)
+        if not devices:
+            return
+        notifications = _get_sendable_notifications(db, user_id=target_user.id_usuario)
+        if not notifications:
+            return
+        device_tokens = [device.token_push for device in devices]
+        for notification in notifications:
+            push_payload: dict[str, object] = {
+                "notification_id": notification.id_notificacion,
+            }
+            if isinstance(notification.payload, dict):
+                push_payload.update(notification.payload)
+            try:
+                result = send_push_notification(
+                    device_tokens=device_tokens,
+                    title=notification.titulo,
+                    message=notification.mensaje,
+                    payload=push_payload,
+                )
+            except PushProviderError:
+                notification.estado = "FALLIDA"
+                notification.proveedor = settings.push_provider
+                db.add(notification)
+                continue
+            invalid_set = set(result.invalid_tokens)
+            for device in devices:
+                if device.token_push in invalid_set and device.activo:
+                    device.activo = False
+                    device.ultimo_registro = utc_now()
+                    db.add(device)
+            if result.success:
+                notification.estado = "ENVIADA"
+                notification.fecha_envio = notification.fecha_envio or utc_now()
+                notification.proveedor = result.provider
+            else:
+                notification.estado = "FALLIDA"
+                notification.proveedor = result.provider
+            db.add(notification)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def _get_user_device_by_token(
     db: Session,
     *,
@@ -572,6 +697,19 @@ def _get_user_notification(
 
 
 def _serialize_notification_item(notification: Notificacion) -> NotificationInboxItem:
+    payload = notification.payload
+    notification_type = None
+    entity_type = None
+    entity_id = None
+    route_suggested = None
+    if isinstance(payload, dict):
+        notification_type = payload.get("type")
+        entity_type = payload.get("entity_type")
+        eid = payload.get("entity_id")
+        if isinstance(eid, int):
+            entity_id = eid
+        route_suggested = payload.get("route_suggested")
+
     return NotificationInboxItem(
         notification_id=notification.id_notificacion,
         service_id=notification.id_servicio,
@@ -579,12 +717,16 @@ def _serialize_notification_item(notification: Notificacion) -> NotificationInbo
         channel=notification.canal,
         title=notification.titulo,
         message=notification.mensaje,
-        payload=notification.payload,
+        payload=payload,
         status=notification.estado,
         provider=notification.proveedor,
         created_at=notification.fecha_creacion,
         sent_at=notification.fecha_envio,
         read_at=notification.fecha_lectura,
+        type=notification_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        route_suggested=route_suggested,
     )
 
 
@@ -870,23 +1012,33 @@ def _mark_arrival_if_needed(
             user_agent=user_agent,
         )
     )
-    db.add(
-        Notificacion(
-            id_usuario=client_user.id_usuario,
-            id_servicio=service.id_servicio,
-            id_solicitud=service.id_solicitud,
-            canal="WEB",
-            titulo="Operario en sitio",
-            mensaje="El operario ya llego a la ubicacion del incidente.",
-            payload={
-                "service_id": service.id_servicio,
-                "incident_id": incident.id_incidente,
-                "service_state": service.estado,
-            },
-            estado="PENDIENTE",
-        )
+    from .notification_types import NOTIFICATION_TYPE_OPERARIO_LLEGO
+
+    _create_typed_notification(
+        db=db,
+        user=client_user,
+        notification_type=NOTIFICATION_TYPE_OPERARIO_LLEGO,
+        title="Operario en sitio",
+        message="El operario ya llego a la ubicacion del incidente.",
+        service=service,
+        incident_id=incident.id_incidente,
     )
     return True
+
+
+def _get_route_data(
+    db: Session,
+    *,
+    service_id: int,
+) -> ServicioUbicacion | None:
+    return db.scalar(
+        select(ServicioUbicacion)
+        .where(
+            ServicioUbicacion.id_servicio == service_id,
+            ServicioUbicacion.ruta_geometria.is_not(None),
+        )
+        .order_by(ServicioUbicacion.fecha_hora.asc(), ServicioUbicacion.id_ubicacion.asc())
+    )
 
 
 def _get_last_location(
@@ -1423,6 +1575,15 @@ def start_navigation(
         accuracy_meters=payload.accuracy_meters,
         speed_mps=payload.speed_mps,
         device_timestamp=now,
+        route_data={
+            "origin_lat": payload.latitud_actual,
+            "origin_lon": payload.longitud_actual,
+            "dest_lat": incident.latitud,
+            "dest_lon": incident.longitud,
+            "distance_meters": route.distance_meters,
+            "duration_seconds": route.duration_seconds,
+            "geometry": route.geometry,
+        },
     )
 
     message = "Navigation route created successfully."
@@ -1447,6 +1608,16 @@ def start_navigation(
                 user_agent=user_agent,
             )
         )
+        client_user = _get_client_user(db, cliente_id=incident.id_cliente)
+        _create_typed_notification(
+            db=db,
+            user=client_user,
+            notification_type=NOTIFICATION_TYPE_OPERARIO_EN_CAMINO,
+            title="Operario en camino",
+            message="El operario va en camino hacia tu ubicacion.",
+            service=service,
+            incident_id=incident.id_incidente,
+        )
         message = "Navigation started successfully."
 
     try:
@@ -1457,6 +1628,10 @@ def start_navigation(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Navigation start could not be persisted.",
         ) from exc
+
+    if message == "Navigation started successfully.":
+        client_user = _get_client_user(db, cliente_id=incident.id_cliente)
+        _auto_dispatch_notifications(target_user=client_user, db=db)
 
     return NavigationStartResponse(
         service_id=service.id_servicio,
@@ -1622,6 +1797,8 @@ def get_navigation_status(
         service_id=service.id_servicio,
     )
 
+    route_location = _get_route_data(db, service_id=service.id_servicio)
+
     return NavigationStatusResponse(
         service_id=service.id_servicio,
         service_state=service.estado,
@@ -1636,6 +1813,15 @@ def get_navigation_status(
         profile_acknowledged=profile_acknowledged,
         has_arrived=has_arrived,
         arrival_threshold_meters=settings.navigation_arrival_threshold_meters,
+        route_distance_meters=(
+            route_location.ruta_distancia_metros if route_location is not None else None
+        ),
+        route_duration_seconds=(
+            route_location.ruta_duracion_segundos if route_location is not None else None
+        ),
+        route_geometry=(
+            route_location.ruta_geometria if route_location is not None else None
+        ),
         message="Navigation status loaded successfully.",
     )
 
@@ -2212,6 +2398,43 @@ def get_my_unread_notification_count(
     return UnreadCountResponse(unread_count=int(unread_count or 0))
 
 
+def mark_all_notifications_as_read(
+    *,
+    current_user: Usuario,
+    db: Session,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> MarkAllReadResponse:
+    now = utc_now()
+    marked = db.execute(
+        select(Notificacion).where(
+            Notificacion.id_usuario == current_user.id_usuario,
+            Notificacion.estado != "LEIDA",
+        )
+    ).scalars().all()
+
+    for notification in marked:
+        notification.estado = "LEIDA"
+        notification.fecha_lectura = now
+        if notification.fecha_envio is None:
+            notification.fecha_envio = now
+        db.add(notification)
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Notifications could not be marked as read.",
+        ) from exc
+
+    return MarkAllReadResponse(
+        marked_count=len(marked),
+        message="All notifications marked as read successfully.",
+    )
+
+
 def _dispatch_pending_notifications_for_user(
     *,
     target_user: Usuario,
@@ -2544,37 +2767,43 @@ def update_service_progress(
         )
     )
 
+    from .notification_types import (
+        NOTIFICATION_TYPE_GENERAL,
+        NOTIFICATION_TYPE_SERVICIO_INICIADO,
+    )
+
     client_user = _get_client_user(db, cliente_id=incident.id_cliente)
-    _create_service_notification(
+    client_notification_type = (
+        NOTIFICATION_TYPE_SERVICIO_INICIADO
+        if previous_state == "EN_SITIO" and requested_state in ("EN_DIAGNOSTICO_FISICO", "EN_REPARACION")
+        else NOTIFICATION_TYPE_GENERAL
+    )
+    _create_typed_notification(
         db=db,
         user=client_user,
-        service=service,
+        notification_type=client_notification_type,
         title="Actualizacion del servicio",
         message=f"Tu servicio ahora esta en estado {requested_state}.",
-        payload={
-            "service_id": service.id_servicio,
-            "incident_id": incident.id_incidente,
-            "new_state": requested_state,
-        },
+        service=service,
+        incident_id=incident.id_incidente,
+        extra_payload={"new_state": requested_state},
     )
     for admin_user in _get_workshop_admin_users(
         db,
         workshop_id=service.solicitud.id_taller,
     ):
-        _create_service_notification(
+        _create_typed_notification(
             db=db,
             user=admin_user,
-            service=service,
+            notification_type=NOTIFICATION_TYPE_GENERAL,
             title="Progreso del servicio actualizado",
             message=(
                 f"El operario actualizo el servicio {service.id_servicio} "
                 f"a {requested_state}."
             ),
-            payload={
-                "service_id": service.id_servicio,
-                "incident_id": incident.id_incidente,
-                "new_state": requested_state,
-            },
+            service=service,
+            incident_id=incident.id_incidente,
+            extra_payload={"new_state": requested_state},
         )
 
     try:
@@ -2585,6 +2814,8 @@ def update_service_progress(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Service progress update could not be persisted.",
         ) from exc
+
+    _auto_dispatch_notifications(target_user=client_user, db=db)
 
     return ServiceProgressUpdateResponse(
         service_id=service.id_servicio,
