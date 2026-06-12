@@ -15,6 +15,7 @@ import '../../packages/finanzas_seguros/presentation/pages/service_payment_page.
 import '../../packages/inteligencia_triaje/data/models/incident_report_response_model.dart';
 import '../../packages/inteligencia_triaje/presentation/pages/incident_diagnosis_page.dart';
 import '../../packages/inteligencia_triaje/presentation/pages/incident_matchmaking_page.dart';
+import '../../packages/inteligencia_triaje/presentation/pages/pending_incidents_page.dart';
 import '../../packages/inteligencia_triaje/presentation/pages/incident_report_page.dart';
 import '../../packages/inteligencia_triaje/presentation/pages/incident_report_success_page.dart';
 import '../../packages/operaciones_taller/presentation/pages/operator_home_page.dart';
@@ -172,6 +173,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.reportIncident,
         builder: (context, state) => const IncidentReportPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.pendingIncidents,
+        builder: (context, state) =>
+            PendingIncidentsPage(initialMessage: state.extra as String?),
       ),
       GoRoute(
         path: AppRoutes.incidentReported,

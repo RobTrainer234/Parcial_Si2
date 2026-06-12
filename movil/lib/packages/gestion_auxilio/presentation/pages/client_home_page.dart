@@ -11,6 +11,7 @@ import '../../../../core/widgets/app_page_scaffold.dart';
 import '../../../../core/widgets/app_primary_button.dart';
 import '../../../../core/widgets/app_theme_toggle_button.dart';
 import '../../../../core/widgets/app_user_mini_profile.dart';
+import '../../../inteligencia_triaje/presentation/controllers/offline_incident_queue_controller.dart';
 import '../../../seguridad_usuarios/data/models/profile_me_model.dart';
 import '../../../seguridad_usuarios/presentation/controllers/profile_controller.dart';
 import '../controllers/notifications_controller.dart';
@@ -31,9 +32,16 @@ class _ClientHomePageState extends ConsumerState<ClientHomePage> {
     _unreadTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) {
-        if (mounted) ref.invalidate(unreadNotificationsCountProvider);
+        if (mounted) {
+          ref.invalidate(unreadNotificationsCountProvider);
+        }
       },
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref
+          .read(offlineIncidentQueueControllerProvider.notifier)
+          .syncPending(silent: true);
+    });
   }
 
   @override
@@ -54,6 +62,7 @@ class _ClientHomePageState extends ConsumerState<ClientHomePage> {
     final dangerColor = theme.colorScheme.error;
     final profileState = ref.watch(profileControllerProvider);
     final unreadCountAsync = ref.watch(unreadNotificationsCountProvider);
+    final offlinePendingCount = ref.watch(offlinePendingIncidentCountProvider);
     final session = ref.watch(authControllerProvider).valueOrNull;
     final vehicleCount = profileState.valueOrNull?.vehicles.length ?? 0;
 
@@ -282,6 +291,17 @@ class _ClientHomePageState extends ConsumerState<ClientHomePage> {
           ),
           const SizedBox(height: 12),
           _HomeActionCard(
+            title: 'Emergencias pendientes',
+            subtitle:
+                'Consulta reportes guardados sin conexion y fuerza su sincronizacion.',
+            icon: Icons.cloud_sync_outlined,
+            trailingText: offlinePendingCount > 0
+                ? '$offlinePendingCount'
+                : null,
+            onTap: () => context.push(AppRoutes.pendingIncidents),
+          ),
+          const SizedBox(height: 12),
+          _HomeActionCard(
             title: 'Cerrar sesion',
             subtitle: 'Salir de tu cuenta en este dispositivo.',
             icon: Icons.logout_rounded,
@@ -327,7 +347,17 @@ class _ClientHeaderActions extends StatelessWidget {
             onTap: onOpenProfile,
           ),
           const SizedBox(height: 8),
-          const AppThemeToggleButton(),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppThemeToggleButton(),
+              IconButton(
+                tooltip: 'Perfil',
+                onPressed: onOpenProfile,
+                icon: const Icon(Icons.person_rounded, size: 20),
+              ),
+            ],
+          ),
         ],
       ),
     );

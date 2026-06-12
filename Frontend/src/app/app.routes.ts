@@ -39,6 +39,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'reports',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/admin-reports.page').then(
+            (m) => m.AdminReportsPage,
+          ),
+      },
+      {
         path: 'workshop',
         loadComponent: () =>
           import('./packages/operaciones-taller/pages/workshop-management.page').then(

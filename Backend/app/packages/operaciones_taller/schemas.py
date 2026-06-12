@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -501,11 +502,23 @@ class DashboardStuckServiceItem(BaseModel):
     reason: str
 
 
+class DashboardKpiSourceMetadata(BaseModel):
+    kpi_name: str
+    start_event: str | None = None
+    end_event: str | None = None
+    start_field: str | None = None
+    end_field: str | None = None
+    source_tables: list[str] = Field(default_factory=list)
+    source_fields: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
 class WorkshopDashboardKpiResponse(BaseModel):
     pending_requests: int
     accepted_requests: int
     rejected_requests: int
     expired_requests: int
+    cancelled_requests: int
     active_services: int
     completed_services: int
     paid_services: int
@@ -513,12 +526,27 @@ class WorkshopDashboardKpiResponse(BaseModel):
     total_revenue: Decimal
     average_rating: Decimal | None = None
     first_contact_resolution_rate: Decimal | None = None
+    average_assignment_time_minutes: Decimal | None = None
+    min_assignment_time_minutes: Decimal | None = None
+    max_assignment_time_minutes: Decimal | None = None
+    accepted_request_count: int
+    average_operator_assignment_time_minutes: Decimal | None = None
+    unassigned_services_count: int
+    assigned_services_count: int
+    average_arrival_time_minutes: Decimal | None = None
+    min_arrival_time_minutes: Decimal | None = None
+    max_arrival_time_minutes: Decimal | None = None
+    arrived_services_count: int
     average_acceptance_time_minutes: Decimal | None = None
     average_report_to_workshop_assignment_minutes: Decimal | None = None
     average_operario_assignment_time_minutes: Decimal | None = None
-    average_arrival_time_minutes: Decimal | None = None
     average_assignment_to_arrival_minutes: Decimal | None = None
     average_completion_time_minutes: Decimal | None = None
+    completed_services_count: int
+    services_without_operator: int
+    services_without_location: int
+    stale_tracking_services: int
+    services_exceeding_arrival_threshold: int
     cancelled_cases: int
     unattended_cases: int
     sla_compliance_rate: Decimal | None = None
@@ -639,6 +667,7 @@ class OperarioRankingItem(BaseModel):
 class WorkshopDashboardOverviewResponse(BaseModel):
     period: WorkshopDashboardPeriodResponse
     kpis: WorkshopDashboardKpiResponse
+    kpi_sources: list[DashboardKpiSourceMetadata]
     operations: WorkshopDashboardOperationsResponse
     financial: WorkshopDashboardFinancialResponse
     operarios: WorkshopDashboardOperarioResponse
@@ -666,6 +695,106 @@ class VoiceDashboardReportResponse(BaseModel):
     used_filters: VoiceDashboardFiltersResponse
     data_available: bool
     warnings: list[str] = Field(default_factory=list)
+
+
+class ReportFilterResponse(BaseModel):
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    scope: str
+    workshop_id: int | None = None
+    status: str | None = None
+    severity: str | None = None
+    specialty_id: int | None = None
+
+
+class StaticReportSummaryResponse(BaseModel):
+    report_type: str
+    title: str
+    description: str
+    default_period: str
+    supported_filters: list[str] = Field(default_factory=list)
+
+
+class DynamicReportRequest(_NormalizedModel):
+    query: str = Field(min_length=1, max_length=500)
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    scope: str | None = Field(default="TALLER", max_length=50)
+
+
+class DynamicReportKpiItem(BaseModel):
+    key: str
+    label: str
+    value: Decimal | int | float | None = None
+    display_value: str
+    unit: str | None = None
+
+
+class DynamicReportSection(BaseModel):
+    section_id: str
+    title: str
+    description: str
+    items: list[str] = Field(default_factory=list)
+
+
+class DynamicReportChartPoint(BaseModel):
+    label: str
+    value: Decimal | int | float | None = None
+    secondary_value: Decimal | int | float | None = None
+
+
+class DynamicReportChart(BaseModel):
+    chart_id: str
+    title: str
+    chart_type: str
+    points: list[DynamicReportChartPoint] = Field(default_factory=list)
+    unit: str | None = None
+    empty_message: str | None = None
+
+
+class DynamicReportTableColumn(BaseModel):
+    key: str
+    label: str
+
+
+class DynamicReportTable(BaseModel):
+    table_id: str
+    title: str
+    columns: list[DynamicReportTableColumn] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    total_count: int = 0
+    limited: bool = False
+    empty_message: str | None = None
+
+
+class DynamicReportInsight(BaseModel):
+    level: str
+    title: str
+    message: str
+    recommendation: str | None = None
+
+
+class WorkshopReportResponse(BaseModel):
+    report_type: str
+    title: str
+    date_from: datetime
+    date_to: datetime
+    scope: str
+    filters: ReportFilterResponse
+    summary: str
+    kpis: list[DynamicReportKpiItem] = Field(default_factory=list)
+    sections: list[DynamicReportSection] = Field(default_factory=list)
+    charts: list[DynamicReportChart] = Field(default_factory=list)
+    tables: list[DynamicReportTable] = Field(default_factory=list)
+    insights: list[DynamicReportInsight] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_tables: list[str] = Field(default_factory=list)
+    generated_at: datetime
+
+
+class DynamicReportResponse(WorkshopReportResponse):
+    interpreted_query: str
+    transcription: str | None = None
 
 
 WorkshopDashboardOperationsResponse.model_rebuild()

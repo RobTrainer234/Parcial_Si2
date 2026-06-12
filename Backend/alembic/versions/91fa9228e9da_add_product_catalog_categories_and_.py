@@ -1,7 +1,7 @@
 """add product catalog categories and stock fields
 
 Revision ID: 91fa9228e9da
-Revises: 5a6b7c8d9e0f
+Revises: 8d9e0f1a2b3c
 Create Date: 2026-06-12 14:45:59.105712
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '91fa9228e9da'
-down_revision: Union[str, Sequence[str], None] = '5a6b7c8d9e0f'
+down_revision: Union[str, Sequence[str], None] = '8d9e0f1a2b3c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

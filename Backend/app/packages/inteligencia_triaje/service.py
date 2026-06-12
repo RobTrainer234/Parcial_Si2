@@ -449,6 +449,27 @@ def _build_incident_detail_response(incident: Incidente) -> IncidentDetailRespon
     )
 
 
+def _build_incident_report_response(
+    incident: Incidente,
+    *,
+    message: str,
+) -> IncidentReportResponse:
+    ordered_evidences = sorted(incident.evidencias, key=lambda item: item.id_evidencia)
+    return IncidentReportResponse(
+        incident_id=incident.id_incidente,
+        status=incident.estado,
+        message=message,
+        id_vehiculo=incident.id_vehiculo,
+        latitud=incident.latitud,
+        longitud=incident.longitud,
+        descripcion_cliente=incident.descripcion_cliente,
+        especialidad_reportada=_build_specialty_summary(incident.especialidad_reportada_cliente),
+        evidence_summary=_build_evidence_summary(ordered_evidences),
+        evidences=[_serialize_evidence(item) for item in ordered_evidences],
+        fecha_hora=incident.fecha_hora,
+    )
+
+
 def _extract_profile_list(value: Any) -> list[str] | None:
     if isinstance(value, list):
         extracted = [str(item).strip() for item in value if str(item).strip()]
@@ -710,6 +731,63 @@ def _get_owned_incident(db: Session, *, incident_id: int, cliente_id: int) -> In
             detail="Incident not found.",
         )
     return incident
+
+
+def _get_owned_incident_by_local_uuid(
+    db: Session,
+    *,
+    cliente_id: int,
+    local_uuid: str,
+) -> Incidente | None:
+    return db.scalar(
+        _build_incident_query().where(
+            Incidente.id_cliente == cliente_id,
+            Incidente.local_uuid == local_uuid,
+        )
+    )
+
+
+def _has_offline_sync_event(db: Session, *, incident_id: int) -> bool:
+    return (
+        db.scalar(
+            select(Bitacora.id_bitacora).where(
+                Bitacora.id_incidente == incident_id,
+                Bitacora.accion == "INCIDENTE_OFFLINE_SINCRONIZADO",
+            )
+        )
+        is not None
+    )
+
+
+def _ensure_offline_sync_event(
+    *,
+    db: Session,
+    current_user: Usuario,
+    incident: Incidente,
+    offline_sync: bool,
+    ip_origen: str | None,
+    user_agent: str | None,
+) -> bool:
+    if not offline_sync or not incident.local_uuid:
+        return False
+    if _has_offline_sync_event(db, incident_id=incident.id_incidente):
+        return False
+    db.add(
+        _create_bitacora_event(
+            user=current_user,
+            incident=incident,
+            accion="INCIDENTE_OFFLINE_SINCRONIZADO",
+            tipo_evento="SINCRONIZACION",
+            descripcion="Se sincronizo un incidente reportado sin conexion.",
+            datos_nuevos={
+                "local_uuid": incident.local_uuid,
+                "estado": incident.estado,
+            },
+            ip_origen=ip_origen,
+            user_agent=user_agent,
+        )
+    )
+    return True
 
 
 def _get_active_matchmaking_request(
@@ -1795,11 +1873,37 @@ def report_incident(
     payload: IncidentReportCreateData,
     current_user: Usuario,
     db: Session,
+    offline_sync: bool,
     audio_file: UploadFile | None,
     image_files: Sequence[UploadFile],
     ip_origen: str | None,
     user_agent: str | None,
 ) -> IncidentReportResponse:
+    cliente_id = current_user.id_persona
+    if payload.local_uuid:
+        existing_incident = _get_owned_incident_by_local_uuid(
+            db,
+            cliente_id=cliente_id,
+            local_uuid=payload.local_uuid,
+        )
+        if existing_incident is not None:
+            try:
+                if _ensure_offline_sync_event(
+                    db=db,
+                    current_user=current_user,
+                    incident=existing_incident,
+                    offline_sync=offline_sync,
+                    ip_origen=ip_origen,
+                    user_agent=user_agent,
+                ):
+                    db.commit()
+            except SQLAlchemyError:
+                db.rollback()
+            return _build_incident_report_response(
+                existing_incident,
+                message="Incident already registered.",
+            )
+
     _validate_files(audio_file=audio_file, image_files=image_files)
     normalized_description = _normalize_multiline_text(payload.descripcion_cliente) or ""
     if not normalized_description and not image_files and audio_file is None:
@@ -1807,7 +1911,6 @@ def report_incident(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Agrega una descripcion, una foto o un audio para reportar el incidente.",
         )
-    cliente_id = current_user.id_persona
     storage = get_triage_storage()
     stored_media: list[StoredMedia] = []
 
@@ -1822,6 +1925,7 @@ def report_incident(
             descripcion_cliente=normalized_description,
             latitud=payload.latitud,
             longitud=payload.longitud,
+            local_uuid=payload.local_uuid,
             estado="REPORTADO",
         )
         db.add(incident)
@@ -1934,6 +2038,14 @@ def report_incident(
             )
         )
 
+        _ensure_offline_sync_event(
+            db=db,
+            current_user=current_user,
+            incident=incident,
+            offline_sync=offline_sync,
+            ip_origen=ip_origen,
+            user_agent=user_agent,
+        )
         db.commit()
     except HTTPException:
         db.rollback()
@@ -1949,6 +2061,29 @@ def report_incident(
     except IntegrityError as exc:
         db.rollback()
         storage.delete_many(stored_media)
+        if payload.local_uuid:
+            existing_incident = _get_owned_incident_by_local_uuid(
+                db,
+                cliente_id=cliente_id,
+                local_uuid=payload.local_uuid,
+            )
+            if existing_incident is not None:
+                try:
+                    if _ensure_offline_sync_event(
+                        db=db,
+                        current_user=current_user,
+                        incident=existing_incident,
+                        offline_sync=offline_sync,
+                        ip_origen=ip_origen,
+                        user_agent=user_agent,
+                    ):
+                        db.commit()
+                except SQLAlchemyError:
+                    db.rollback()
+                return _build_incident_report_response(
+                    existing_incident,
+                    message="Incident already registered.",
+                )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Incident conflicts with existing data.",
@@ -1975,21 +2110,9 @@ def report_incident(
         incident_id=incident.id_incidente,
         cliente_id=cliente_id,
     )
-    ordered_evidences = sorted(created_incident.evidencias, key=lambda item: item.id_evidencia)
-    return IncidentReportResponse(
-        incident_id=created_incident.id_incidente,
-        status=created_incident.estado,
+    return _build_incident_report_response(
+        created_incident,
         message="Incident created and sent to triage.",
-        id_vehiculo=created_incident.id_vehiculo,
-        latitud=created_incident.latitud,
-        longitud=created_incident.longitud,
-        descripcion_cliente=created_incident.descripcion_cliente,
-        especialidad_reportada=_build_specialty_summary(
-            created_incident.especialidad_reportada_cliente
-        ),
-        evidence_summary=_build_evidence_summary(ordered_evidences),
-        evidences=[_serialize_evidence(item) for item in ordered_evidences],
-        fecha_hora=created_incident.fecha_hora,
     )
 
 

@@ -11,7 +11,7 @@ import 'package:movil/packages/seguridad_usuarios/data/models/user_profile_model
 import 'package:movil/packages/seguridad_usuarios/data/repositories/auth_repository.dart';
 
 class _FakeTokenStorage implements TokenStorage {
-  _FakeTokenStorage({this.initialToken, this.readDelay = Duration.zero});
+  _FakeTokenStorage({this.readDelay = Duration.zero});
 
   String? initialToken;
   final Duration readDelay;
@@ -39,12 +39,11 @@ class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository({
     required this.loginResponse,
     this.loginDelay = Duration.zero,
-    this.meResponse,
   }) : super(ApiClient(Dio()));
 
   final LoginResponseModel loginResponse;
   final Duration loginDelay;
-  final UserProfileModel? meResponse;
+  UserProfileModel? meResponse;
 
   @override
   Future<LoginResponseModel> login({

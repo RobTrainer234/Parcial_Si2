@@ -11,7 +11,12 @@ import { MetricCardComponent } from '../../../shared/components/metric-card.comp
 import { PageHeaderComponent } from '../../../shared/components/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
 import {
+  WebOfflineIncidentQueueEntry,
+  WebOfflineIncidentQueueService,
+} from '../../gestion-auxilio/data-access/web-offline-incident-queue.service';
+import {
   DashboardCountItem,
+  DashboardKpiSourceMetadata,
   DashboardMonthlyRevenueItem,
   DashboardOverviewResponse,
   VoiceDashboardReportResponse,
@@ -68,29 +73,34 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
             hint="Servicios actualmente en ejecución"
           />
           <app-metric-card
-            label="Ingresos confirmados"
-            [value]="formatCurrency(data.financial.total_revenue)"
-            hint="Cobros confirmados en el periodo"
+            label="Tiempo de asignación"
+            [value]="formatMinutes(data.kpis.average_assignment_time_minutes)"
+            hint="Solicitud enviada -> solicitud aceptada"
           />
           <app-metric-card
-            label="Calificación promedio"
-            [value]="formatRating(data.kpis.average_rating)"
-            hint="Promedio real del periodo filtrado"
+            label="Asignación de operario"
+            [value]="formatMinutes(data.kpis.average_operator_assignment_time_minutes)"
+            hint="Aceptación/creación -> operario asignado"
           />
           <app-metric-card
-            label="Acciones críticas"
-            [value]="formatInteger(data.action_items.length)"
-            hint="Elementos operativos que requieren seguimiento"
+            label="Tiempo de llegada"
+            [value]="formatMinutes(data.kpis.average_arrival_time_minutes)"
+            hint="Navegación iniciada -> operario en sitio"
+          />
+          <app-metric-card
+            label="Tiempo de completado"
+            [value]="formatMinutes(data.kpis.average_completion_time_minutes)"
+            hint="Servicio iniciado -> servicio finalizado"
           />
           <app-card
             title="Servicios realizados"
-            subtitle="Consulta el historial operativo, pago y calificacion del taller."
+            subtitle="Conteo real de cierres del periodo."
           >
             <div class="history-card">
               <div>
-                <span class="history-card__label">Servicios completados o pagados</span>
+                <span class="history-card__label">Servicios con fecha_fin registrada</span>
                 <strong class="history-card__value">
-                  {{ formatInteger(data.kpis.completed_services) }}
+                  {{ formatInteger(data.kpis.completed_services_count) }}
                 </strong>
               </div>
               <a routerLink="/admin/services" class="app-button app-button--secondary">
@@ -154,6 +164,66 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
 
         <section class="section-grid">
           <app-card
+            title="Tiempos y cobertura"
+            subtitle="Resumen de promedios, extremos y cobertura real del flujo."
+          >
+            <div class="list">
+              <div class="row">
+                <span>Solicitudes aceptadas medidas</span>
+                <strong>{{ formatInteger(data.kpis.accepted_request_count) }}</strong>
+              </div>
+              <div class="row">
+                <span>Asignación min / max</span>
+                <strong>
+                  {{ formatMinutes(data.kpis.min_assignment_time_minutes) }} / {{ formatMinutes(data.kpis.max_assignment_time_minutes) }}
+                </strong>
+              </div>
+              <div class="row">
+                <span>Servicios con operario / sin operario</span>
+                <strong>
+                  {{ formatInteger(data.kpis.assigned_services_count) }} / {{ formatInteger(data.kpis.unassigned_services_count) }}
+                </strong>
+              </div>
+              <div class="row">
+                <span>Servicios llegados medidos</span>
+                <strong>{{ formatInteger(data.kpis.arrived_services_count) }}</strong>
+              </div>
+              <div class="row">
+                <span>Llegada min / max</span>
+                <strong>
+                  {{ formatMinutes(data.kpis.min_arrival_time_minutes) }} / {{ formatMinutes(data.kpis.max_arrival_time_minutes) }}
+                </strong>
+              </div>
+            </div>
+          </app-card>
+
+          <app-card
+            title="Riesgos operativos"
+            subtitle="Indicadores simples basados en estados, tracking y asignación."
+          >
+            <div class="list">
+              <div class="row">
+                <span>Servicios sin operario</span>
+                <strong>{{ formatInteger(data.kpis.services_without_operator) }}</strong>
+              </div>
+              <div class="row">
+                <span>Servicios sin ubicación</span>
+                <strong>{{ formatInteger(data.kpis.services_without_location) }}</strong>
+              </div>
+              <div class="row">
+                <span>Tracking desactualizado</span>
+                <strong>{{ formatInteger(data.kpis.stale_tracking_services) }}</strong>
+              </div>
+              <div class="row">
+                <span>Ruta excede umbral de llegada</span>
+                <strong>{{ formatInteger(data.kpis.services_exceeding_arrival_threshold) }}</strong>
+              </div>
+            </div>
+          </app-card>
+        </section>
+
+        <section class="section-grid">
+          <app-card
             title="Acciones prioritarias"
             subtitle="Resumen de alertas y decisiones recomendadas para el administrador."
           >
@@ -203,6 +273,98 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         </section>
 
         <section class="section-grid">
+          <app-card
+            title="Solicitudes por estado"
+            subtitle="Conteo real de solicitudes del periodo."
+          >
+            @if (data.operations.requests_by_status.length) {
+              <div class="list">
+                @for (item of data.operations.requests_by_status; track item.label) {
+                  <div class="row">
+                    <app-status-badge [label]="item.label" />
+                    <strong>{{ formatInteger(item.count) }}</strong>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state
+                title="Sin solicitudes"
+                message="No hay solicitudes registradas para el filtro actual."
+              />
+            }
+          </app-card>
+
+          <app-card
+            title="Incidentes por severidad"
+            subtitle="Incidentes vinculados a solicitudes del taller."
+          >
+            @if (data.operations.incidents_by_severity.length) {
+              <div class="list">
+                @for (item of data.operations.incidents_by_severity; track item.label) {
+                  <div class="row">
+                    <app-status-badge [label]="item.label" />
+                    <strong>{{ formatInteger(item.count) }}</strong>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state
+                title="Sin severidades"
+                message="No hay incidentes suficientes para este periodo."
+              />
+            }
+          </app-card>
+        </section>
+
+        <section class="section-grid">
+          <app-card
+            title="Incidentes por especialidad"
+            subtitle="Tipo de falla detectada en el periodo."
+          >
+            @if (data.operations.incidents_by_detected_specialty.length) {
+              <div class="list">
+                @for (item of data.operations.incidents_by_detected_specialty; track item.label) {
+                  <div class="row">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ formatInteger(item.count) }}</strong>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state
+                title="Sin especialidades"
+                message="No hay incidentes con especialidad detectada para este filtro."
+              />
+            }
+          </app-card>
+
+          <app-card
+            title="Fuente del KPI"
+            subtitle="Trazabilidad breve para defensa del examen."
+          >
+            @if (data.kpi_sources.length) {
+              <div class="list">
+                @for (source of data.kpi_sources; track source.kpi_name) {
+                  <article class="list__item">
+                    <div class="list__meta">
+                      <strong>{{ formatKpiSourceName(source.kpi_name) }}</strong>
+                    </div>
+                    <p class="text-muted">
+                      {{ source.start_event || 'Sin evento inicial' }} -> {{ source.end_event || 'Sin evento final' }}
+                    </p>
+                    <small class="text-muted">Campos: {{ formatKpiSourceFields(source) }}</small>
+                    <small class="text-muted">Tablas: {{ source.source_tables.join(', ') }}</small>
+                  </article>
+                }
+              </div>
+            } @else {
+              <app-empty-state
+                title="Sin trazabilidad"
+                message="No hay metadatos de fuente disponibles para este dashboard."
+              />
+            }
+          </app-card>
+
           <app-card
             title="Incidentes por tipo"
             subtitle="Clasificacion operacional basada en los incidentes registrados."
@@ -374,6 +536,64 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
                     </div>
                   }
                 </div>
+              }
+            </div>
+          </app-card>
+        </section>
+        <section class="section-grid">
+          <app-card
+            title="Cola offline web"
+            subtitle="Fallback minimo para PWA/admin. El flujo principal de incidentes offline vive en la app movil."
+          >
+            <div class="offline-queue">
+              <div class="history-card">
+                <div>
+                  <span class="history-card__label">Elementos pendientes o con error</span>
+                  <strong class="history-card__value">
+                    {{ webOfflinePendingCount() }}
+                  </strong>
+                </div>
+                <div class="offline-queue__actions">
+                  <button type="button" class="app-button app-button--secondary" (click)="addWebOfflineDemoEntry()">
+                    Guardar demo local
+                  </button>
+                  <button type="button" class="app-button app-button--secondary" (click)="simulateWebOfflineSync()">
+                    Simular sync
+                  </button>
+                  <button type="button" class="app-button app-button--ghost" (click)="simulateWebOfflineError()">
+                    Simular error
+                  </button>
+                </div>
+              </div>
+
+              @if (webOfflineEntries().length) {
+                <div class="list">
+                  @for (entry of webOfflineEntries(); track entry.local_uuid) {
+                    <article class="list__item">
+                      <div class="list__meta">
+                        <span class="badge" [class]="webOfflineBadgeClass(entry.status)">
+                          {{ entry.status }}
+                        </span>
+                        <strong>{{ entry.local_uuid }}</strong>
+                      </div>
+                      <p class="text-muted">{{ entry.description }}</p>
+                      <small class="text-muted">
+                        {{ formatDateTime(entry.created_at_local) }}
+                        @if (entry.server_incident_id) {
+                          · incidente #{{ entry.server_incident_id }}
+                        }
+                      </small>
+                      @if (entry.last_error) {
+                        <small class="feedback feedback--error">{{ entry.last_error }}</small>
+                      }
+                    </article>
+                  }
+                </div>
+              } @else {
+                <app-empty-state
+                  title="Sin elementos locales"
+                  message="No hay reportes de demostracion guardados en localStorage para la web admin."
+                />
               }
             </div>
           </app-card>
@@ -558,6 +778,18 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
         border: 1px solid color-mix(in srgb, #f59e0b 28%, var(--color-border));
       }
 
+      .offline-queue {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      .offline-queue__actions {
+        display: flex;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+      }
+
       .revenue-bars {
         display: flex;
         flex-direction: column;
@@ -649,6 +881,7 @@ import { WorkshopDashboardApi } from '../data-access/workshop-dashboard.api';
 })
 export class AdminDashboardPage {
   private readonly dashboardApi = inject(WorkshopDashboardApi);
+  private readonly webOfflineQueue = inject(WebOfflineIncidentQueueService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly loading = signal(false);
@@ -665,6 +898,10 @@ export class AdminDashboardPage {
 
   protected readonly actionItemsPreview = computed(() =>
     (this.overview()?.action_items ?? []).slice(0, 6),
+  );
+  protected readonly webOfflineEntries = computed(() => this.webOfflineQueue.entries());
+  protected readonly webOfflinePendingCount = computed(() =>
+    this.webOfflineQueue.pendingCount(),
   );
 
   constructor() {
@@ -737,7 +974,7 @@ export class AdminDashboardPage {
 
   protected formatRating(value: number | null | undefined): string {
     if (value === null || value === undefined) {
-      return 'Sin datos';
+      return 'Sin datos suficientes';
     }
 
     return `${value.toFixed(1)} / 5`;
@@ -745,7 +982,7 @@ export class AdminDashboardPage {
 
   protected formatMinutes(value: number | null | undefined): string {
     if (value === null || value === undefined) {
-      return 'Sin datos';
+      return 'Sin datos suficientes';
     }
 
     return `${Math.round(value)} min`;
@@ -753,10 +990,31 @@ export class AdminDashboardPage {
 
   protected formatPercentage(value: number | null | undefined): string {
     if (value === null || value === undefined) {
-      return 'Sin datos';
+      return 'Sin datos suficientes';
     }
 
     return `${value.toFixed(1)}%`;
+  }
+
+  protected formatKpiSourceName(value: string): string {
+    switch (value) {
+      case 'assignment_time':
+        return 'Tiempo de asignación';
+      case 'operator_assignment_time':
+        return 'Tiempo de asignación de operario';
+      case 'arrival_time':
+        return 'Tiempo de llegada';
+      case 'completion_time':
+        return 'Tiempo de completado';
+      default:
+        return value;
+    }
+  }
+
+  protected formatKpiSourceFields(source: DashboardKpiSourceMetadata): string {
+    const fields = [source.start_field, source.end_field, ...source.source_fields]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    return Array.from(new Set(fields)).join(', ');
   }
 
   protected slaHint(data: DashboardOverviewResponse): string {
@@ -795,6 +1053,42 @@ export class AdminDashboardPage {
     return Math.max(10, (currentValue / maxValue) * 100);
   }
 
+  protected addWebOfflineDemoEntry(): void {
+    this.webOfflineQueue.addDemoEntry();
+  }
+
+  protected simulateWebOfflineSync(): void {
+    this.webOfflineQueue.simulateSync();
+  }
+
+  protected simulateWebOfflineError(): void {
+    this.webOfflineQueue.simulateError();
+  }
+
+  protected webOfflineBadgeClass(status: WebOfflineIncidentQueueEntry['status']): string {
+    switch (status) {
+      case 'SINCRONIZADO':
+        return 'badge badge--success';
+      case 'SINCRONIZANDO':
+        return 'badge badge--info';
+      case 'ERROR_SYNC':
+        return 'badge badge--danger';
+      default:
+        return 'badge badge--warning';
+    }
+  }
+
+  protected formatDateTime(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return 'Fecha local no disponible';
+    }
+    return new Intl.DateTimeFormat('es-BO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(parsed);
+  }
+
   private asNumber(value: number | string | null | undefined): number {
     const numericValue = Number(value ?? 0);
     return Number.isFinite(numericValue) ? numericValue : 0;
@@ -814,6 +1108,7 @@ export class AdminDashboardPage {
         accepted_requests: this.asNumber(data.kpis?.accepted_requests),
         rejected_requests: this.asNumber(data.kpis?.rejected_requests),
         expired_requests: this.asNumber(data.kpis?.expired_requests),
+        cancelled_requests: this.asNumber(data.kpis?.cancelled_requests),
         active_services: this.asNumber(data.kpis?.active_services),
         completed_services: this.asNumber(data.kpis?.completed_services),
         paid_services: this.asNumber(data.kpis?.paid_services),
@@ -828,10 +1123,52 @@ export class AdminDashboardPage {
           data.kpis?.first_contact_resolution_rate !== undefined
             ? Number(data.kpis.first_contact_resolution_rate)
             : null,
+        average_assignment_time_minutes:
+          data.kpis?.average_assignment_time_minutes !== null &&
+          data.kpis?.average_assignment_time_minutes !== undefined
+            ? Number(data.kpis.average_assignment_time_minutes)
+            : null,
+        min_assignment_time_minutes:
+          data.kpis?.min_assignment_time_minutes !== null &&
+          data.kpis?.min_assignment_time_minutes !== undefined
+            ? Number(data.kpis.min_assignment_time_minutes)
+            : null,
+        max_assignment_time_minutes:
+          data.kpis?.max_assignment_time_minutes !== null &&
+          data.kpis?.max_assignment_time_minutes !== undefined
+            ? Number(data.kpis.max_assignment_time_minutes)
+            : null,
+        accepted_request_count: this.asNumber(data.kpis?.accepted_request_count),
+        average_operator_assignment_time_minutes:
+          data.kpis?.average_operator_assignment_time_minutes !== null &&
+          data.kpis?.average_operator_assignment_time_minutes !== undefined
+            ? Number(data.kpis.average_operator_assignment_time_minutes)
+            : null,
+        unassigned_services_count: this.asNumber(data.kpis?.unassigned_services_count),
+        assigned_services_count: this.asNumber(data.kpis?.assigned_services_count),
+        average_arrival_time_minutes:
+          data.kpis?.average_arrival_time_minutes !== null &&
+          data.kpis?.average_arrival_time_minutes !== undefined
+            ? Number(data.kpis.average_arrival_time_minutes)
+            : null,
+        min_arrival_time_minutes:
+          data.kpis?.min_arrival_time_minutes !== null &&
+          data.kpis?.min_arrival_time_minutes !== undefined
+            ? Number(data.kpis.min_arrival_time_minutes)
+            : null,
+        max_arrival_time_minutes:
+          data.kpis?.max_arrival_time_minutes !== null &&
+          data.kpis?.max_arrival_time_minutes !== undefined
+            ? Number(data.kpis.max_arrival_time_minutes)
+            : null,
+        arrived_services_count: this.asNumber(data.kpis?.arrived_services_count),
         average_acceptance_time_minutes:
           data.kpis?.average_acceptance_time_minutes !== null &&
           data.kpis?.average_acceptance_time_minutes !== undefined
             ? Number(data.kpis.average_acceptance_time_minutes)
+            : data.kpis?.average_assignment_time_minutes !== null &&
+                data.kpis?.average_assignment_time_minutes !== undefined
+              ? Number(data.kpis.average_assignment_time_minutes)
             : null,
         average_report_to_workshop_assignment_minutes:
           data.kpis?.average_report_to_workshop_assignment_minutes !== null &&
@@ -843,11 +1180,6 @@ export class AdminDashboardPage {
           data.kpis?.average_operario_assignment_time_minutes !== undefined
             ? Number(data.kpis.average_operario_assignment_time_minutes)
             : null,
-        average_arrival_time_minutes:
-          data.kpis?.average_arrival_time_minutes !== null &&
-          data.kpis?.average_arrival_time_minutes !== undefined
-            ? Number(data.kpis.average_arrival_time_minutes)
-            : null,
         average_assignment_to_arrival_minutes:
           data.kpis?.average_assignment_to_arrival_minutes !== null &&
           data.kpis?.average_assignment_to_arrival_minutes !== undefined
@@ -858,6 +1190,13 @@ export class AdminDashboardPage {
           data.kpis?.average_completion_time_minutes !== undefined
             ? Number(data.kpis.average_completion_time_minutes)
             : null,
+        completed_services_count: this.asNumber(data.kpis?.completed_services_count),
+        services_without_operator: this.asNumber(data.kpis?.services_without_operator),
+        services_without_location: this.asNumber(data.kpis?.services_without_location),
+        stale_tracking_services: this.asNumber(data.kpis?.stale_tracking_services),
+        services_exceeding_arrival_threshold: this.asNumber(
+          data.kpis?.services_exceeding_arrival_threshold,
+        ),
         cancelled_cases: this.asNumber(data.kpis?.cancelled_cases),
         unattended_cases: this.asNumber(data.kpis?.unattended_cases),
         sla_compliance_rate:
@@ -872,6 +1211,7 @@ export class AdminDashboardPage {
             ? Number(data.kpis.tenant_efficiency_score)
             : null,
       },
+      kpi_sources: data.kpi_sources ?? [],
       operations: {
         services_by_state: data.operations?.services_by_state ?? [],
         requests_by_status: data.operations?.requests_by_status ?? [],
@@ -913,6 +1253,7 @@ export class AdminDashboardPage {
         accepted_requests: 0,
         rejected_requests: 0,
         expired_requests: 0,
+        cancelled_requests: 0,
         active_services: 0,
         completed_services: 0,
         paid_services: 0,
@@ -920,12 +1261,27 @@ export class AdminDashboardPage {
         total_revenue: 0,
         average_rating: null,
         first_contact_resolution_rate: null,
+        average_assignment_time_minutes: null,
+        min_assignment_time_minutes: null,
+        max_assignment_time_minutes: null,
+        accepted_request_count: 0,
+        average_operator_assignment_time_minutes: null,
+        unassigned_services_count: 0,
+        assigned_services_count: 0,
+        average_arrival_time_minutes: null,
+        min_arrival_time_minutes: null,
+        max_arrival_time_minutes: null,
+        arrived_services_count: 0,
         average_acceptance_time_minutes: null,
         average_report_to_workshop_assignment_minutes: null,
         average_operario_assignment_time_minutes: null,
-        average_arrival_time_minutes: null,
         average_assignment_to_arrival_minutes: null,
         average_completion_time_minutes: null,
+        completed_services_count: 0,
+        services_without_operator: 0,
+        services_without_location: 0,
+        stale_tracking_services: 0,
+        services_exceeding_arrival_threshold: 0,
         cancelled_cases: 0,
         unattended_cases: 0,
         sla_compliance_rate: null,
@@ -933,6 +1289,7 @@ export class AdminDashboardPage {
         sla_evaluated_services: 0,
         tenant_efficiency_score: null,
       },
+      kpi_sources: [],
       operations: {
         services_by_state: [],
         requests_by_status: [],

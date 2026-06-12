@@ -17,12 +17,21 @@ class IncidentReportCreateData(_NormalizedModel):
     longitud: Decimal = Field(ge=Decimal("-180"), le=Decimal("180"))
     descripcion_cliente: str = Field(default="", max_length=5000)
     id_especialidad_reportada_cliente: int
+    local_uuid: str | None = Field(default=None, max_length=64)
 
     @field_validator("descripcion_cliente")
     @classmethod
     def normalize_description(cls, value: str) -> str:
         normalized = " ".join(value.split())
         return normalized
+
+    @field_validator("local_uuid")
+    @classmethod
+    def normalize_local_uuid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class IncidentEvidenceResponse(BaseModel):

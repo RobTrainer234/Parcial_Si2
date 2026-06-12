@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import {
   Component,
   DestroyRef,
+  OnDestroy,
   OnInit,
   computed,
   effect,
@@ -12,6 +13,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import * as L from 'leaflet';
 import { interval, switchMap } from 'rxjs';
 
+import { AuthService } from '../../../core/auth/auth.service';
+import { WorkshopSelectionService } from '../../../core/auth/workshop-selection.service';
 import { AppCardComponent } from '../../../shared/components/app-card.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state.component';
@@ -20,8 +23,13 @@ import { PageHeaderComponent } from '../../../shared/components/page-header.comp
 import { StatusBadgeComponent } from '../../../shared/components/status-badge.component';
 import {
   ServiceTrackingStatus,
+  ServiceWithOperator,
   WorkshopTrackingApi,
 } from '../data-access/workshop-tracking.api';
+import {
+  WorkshopTrackingRealtimeEvent,
+  WorkshopTrackingRealtimeService,
+} from '../data-access/workshop-tracking.realtime';
 
 interface ServiceItem {
   serviceId: number;
@@ -48,7 +56,7 @@ interface ServiceItem {
       <app-page-header
         eyebrow="Monitoreo en vivo"
         title="Tracking de servicios"
-        subtitle="Visualiza en tiempo real la ubicación de los operarios y el estado de los servicios activos."
+        subtitle="Visualiza en tiempo real la ubicacion de los operarios y el estado de los servicios activos."
       >
         <button
           page-actions
@@ -60,6 +68,8 @@ interface ServiceItem {
           {{ loading() ? 'Actualizando...' : 'Actualizar' }}
         </button>
       </app-page-header>
+
+      <p class="tracking-connection">{{ realtimeConnectionLabel() }}</p>
 
       @if (loading() && services().length === 0) {
         <app-loading-state
@@ -100,7 +110,7 @@ interface ServiceItem {
                       @if (svc.loading) {
                         <app-loading-state
                           title="Cargando..."
-                          message="Obteniendo ubicación del operario."
+                          message="Obteniendo ubicacion del operario."
                         />
                       } @else if (svc.error; as err) {
                         <p class="tracking-card__error">{{ err }}</p>
@@ -114,10 +124,10 @@ interface ServiceItem {
                               {{ st.last_operario_longitud?.toFixed(5) }}
                             </p>
                           } @else {
-                            <p><strong>Operario:</strong> Sin ubicación aún</p>
+                            <p><strong>Operario:</strong> Sin ubicacion aun</p>
                           }
                           @if (st.last_location_at; as date) {
-                            <p><strong>Última actualización:</strong> {{ date | date:'short' }}</p>
+                            <p><strong>Ultima actualizacion:</strong> {{ date | date:'short' }}</p>
                           }
                           @if (st.current_distance_meters != null) {
                             <p>
@@ -147,6 +157,12 @@ interface ServiceItem {
   `,
   styles: [
     `
+      .tracking-connection {
+        margin: 0 0 var(--space-4);
+        color: var(--color-text-muted);
+        font-size: 0.9rem;
+      }
+
       .tracking-layout {
         display: flex;
         flex-direction: column;
@@ -233,38 +249,60 @@ interface ServiceItem {
     `,
   ],
 })
-export class ServiceTrackingPage implements OnInit {
+export class ServiceTrackingPage implements OnInit, OnDestroy {
   private readonly api = inject(WorkshopTrackingApi);
+  private readonly authService = inject(AuthService);
+  private readonly workshopSelection = inject(WorkshopSelectionService);
+  private readonly realtime = inject(WorkshopTrackingRealtimeService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly services = signal<ServiceItem[]>([]);
-  protected readonly activeServiceIds = computed(() =>
-    this.services()
-      .filter((s) => s.status?.has_live_location)
-      .map((s) => s.serviceId),
-  );
+  protected readonly realtimeState = this.realtime.connectionState;
+  protected readonly realtimeConnectionLabel = computed(() => {
+    switch (this.realtimeState()) {
+      case 'connected':
+        return 'Conectado en tiempo real';
+      case 'reconnecting':
+        return 'Reconectando';
+      default:
+        return 'Sin conexion en tiempo real';
+    }
+  });
 
   private map: L.Map | null = null;
-  private markers: Map<number, { operario: L.Marker; incidente: L.Marker }> =
-    new Map();
-  private polylines: Map<number, L.Polyline> = new Map();
+  private readonly markers = new Map<number, { operario: L.Marker; incidente: L.Marker }>();
+  private readonly polylines = new Map<number, L.Polyline>();
   private readonly incidentIcon = L.divIcon({
     className: '',
-    html: `<div style="background:#dc2626;color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📍</div>`,
+    html: '<div style="background:#dc2626;color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,0.3);">!</div>',
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   });
   private readonly operarioIcon = L.divIcon({
     className: '',
-    html: `<div style="background:#16a34a;color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,0.3);animation:pulse-live 2s ease-in-out infinite;">🔧</div>`,
+    html: '<div style="background:#16a34a;color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,0.3);animation:pulse-live 2s ease-in-out infinite;">O</div>',
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   });
 
+  constructor() {
+    effect(() => {
+      const workshopId = this.resolveRealtimeWorkshopId();
+      if (workshopId == null) {
+        this.realtime.disconnect();
+        return;
+      }
+      this.realtime.connect(workshopId);
+    });
+  }
+
   ngOnInit(): void {
     this.reload();
+    this.realtime.events$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => this.applyRealtimeEvent(event));
     interval(10000)
       .pipe(
         switchMap(() => this.api.getWorkshopActiveServicesWithTracking()),
@@ -281,6 +319,7 @@ export class ServiceTrackingPage implements OnInit {
   }
 
   ngOnDestroy(): void {
+    this.realtime.disconnect();
     this.map?.remove();
   }
 
@@ -304,104 +343,119 @@ export class ServiceTrackingPage implements OnInit {
 
   toggleExpand(serviceId: number): void {
     this.services.update((list) =>
-      list.map((s) => {
-        if (s.serviceId !== serviceId) return s;
-        const expanded = !s.expanded;
-        if (expanded && s.status === null) {
-          this.loadServiceTracking(s.serviceId);
-        }
-        return { ...s, expanded };
-      }),
-    );
-  }
-
-  private loadServiceTracking(serviceId: number): void {
-    this.services.update((list) =>
-      list.map((s) =>
-        s.serviceId === serviceId ? { ...s, loading: true, error: null } : s,
+      list.map((item) =>
+        item.serviceId === serviceId
+          ? { ...item, expanded: !item.expanded }
+          : item,
       ),
     );
-    this.api
-      .getTrackingStatus(serviceId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (status) => {
-          this.services.update((list) =>
-            list.map((s) =>
-              s.serviceId === serviceId
-                ? { ...s, status, loading: false, error: null }
-                : s,
-            ),
-          );
-          this.updateMapMarker(serviceId, status);
-        },
-        error: (err) => {
-          this.services.update((list) =>
-            list.map((s) =>
-              s.serviceId === serviceId
-                ? {
-                    ...s,
-                    loading: false,
-                    error: err?.message ?? 'Error al cargar tracking.',
-                  }
-                : s,
-            ),
-          );
-        },
-      });
   }
 
-  private updateFromPolling(
-    data: import('../data-access/workshop-tracking.api').ServiceWithOperator[],
-  ): void {
+  private resolveRealtimeWorkshopId(): number | null {
+    if (this.authService.isGerente()) {
+      return this.workshopSelection.selectedWorkshopId();
+    }
+    return this.authService.currentUser()?.actor_context?.taller_id ?? null;
+  }
+
+  private updateFromPolling(data: ServiceWithOperator[]): void {
     this.services.set(
-      data.map((d) => ({
-        serviceId: d.service_id,
-        status: d.last_operario_latitud != null
-          ? ({
-              service_id: d.service_id,
-              service_state: d.service_state,
-              incident_id: d.incident_id,
-              incident_latitud: d.incident_latitud,
-              incident_longitud: d.incident_longitud,
-              last_operario_latitud: d.last_operario_latitud,
-              last_operario_longitud: d.last_operario_longitud,
-              last_location_at: d.last_location_at,
-              has_live_location: d.has_live_location,
-              location_stale: false,
-              current_distance_meters: d.current_distance_meters,
-              eta_text: d.eta_text,
-              tracking_message: '',
-            } as ServiceTrackingStatus)
-          : null,
+      data.map((item) => ({
+        serviceId: item.service_id,
+        status: this.toStatusFromWorkshopRow(item),
         expanded: false,
         loading: false,
         error: null,
       })),
     );
-    data.forEach((d) => {
-      if (d.last_operario_latitud != null) {
-        this.updateMapMarker(d.service_id, {
-          service_id: d.service_id,
-          service_state: d.service_state,
-          incident_id: d.incident_id,
-          incident_latitud: d.incident_latitud,
-          incident_longitud: d.incident_longitud,
-          last_operario_latitud: d.last_operario_latitud,
-          last_operario_longitud: d.last_operario_longitud,
-          last_location_at: d.last_location_at,
-          has_live_location: d.has_live_location,
-          location_stale: false,
-          tracking_message: '',
-        });
+    const visibleIds = new Set(data.map((item) => item.service_id));
+    this.markers.forEach((_, serviceId) => {
+      if (!visibleIds.has(serviceId)) {
+        this.removeServiceFromMap(serviceId);
       }
     });
+    data.forEach((item) => this.updateMapMarker(item.service_id, this.toStatusFromWorkshopRow(item)));
+  }
+
+  private applyRealtimeEvent(event: WorkshopTrackingRealtimeEvent): void {
+    const nextState = event.service_state ?? '';
+    if (!this.isTrackingState(nextState)) {
+      this.services.update((list) => list.filter((item) => item.serviceId !== event.service_id));
+      this.removeServiceFromMap(event.service_id);
+      return;
+    }
+
+    const nextStatus: ServiceTrackingStatus = {
+      service_id: event.service_id,
+      service_state: nextState,
+      incident_id: event.incident_id ?? 0,
+      incident_latitud: Number(event.data.incident_latitud ?? 0),
+      incident_longitud: Number(event.data.incident_longitud ?? 0),
+      last_operario_latitud: event.data.operario_latitud ?? null,
+      last_operario_longitud: event.data.operario_longitud ?? null,
+      last_location_at: event.data.last_location_at ?? null,
+      has_live_location: event.data.has_live_location ?? false,
+      location_stale: event.data.location_stale ?? false,
+      current_distance_meters: event.data.current_distance_meters ?? null,
+      eta_seconds: event.data.eta_seconds ?? null,
+      eta_text: event.data.eta_text ?? null,
+      route_distance_meters: event.data.route_distance_meters ?? null,
+      route_duration_seconds: event.data.route_duration_seconds ?? null,
+      route_points: event.data.route_points ?? null,
+      tracking_message: '',
+    };
+
+    this.services.update((list) => {
+      const existing = list.find((item) => item.serviceId === event.service_id);
+      if (!existing) {
+        return [
+          {
+            serviceId: event.service_id,
+            status: nextStatus,
+            expanded: false,
+            loading: false,
+            error: null,
+          },
+          ...list,
+        ];
+      }
+      return list.map((item) =>
+        item.serviceId === event.service_id
+          ? { ...item, status: nextStatus, loading: false, error: null }
+          : item,
+      );
+    });
+    this.updateMapMarker(event.service_id, nextStatus);
+  }
+
+  private isTrackingState(state: string): boolean {
+    return ['ASIGNADO', 'EN_CAMINO', 'EN_SITIO', 'EN_DIAGNOSTICO_FISICO'].includes(state);
+  }
+
+  private toStatusFromWorkshopRow(item: ServiceWithOperator): ServiceTrackingStatus {
+    return {
+      service_id: item.service_id,
+      service_state: item.service_state,
+      incident_id: item.incident_id,
+      incident_latitud: item.incident_latitud,
+      incident_longitud: item.incident_longitud,
+      last_operario_latitud: item.last_operario_latitud,
+      last_operario_longitud: item.last_operario_longitud,
+      last_location_at: item.last_location_at ?? null,
+      has_live_location: item.has_live_location,
+      location_stale: !item.has_live_location && item.last_location_at != null,
+      current_distance_meters: item.current_distance_meters ?? null,
+      eta_text: item.eta_text ?? null,
+      tracking_message: '',
+    };
   }
 
   private initMap(): void {
-    const el = document.querySelector('.tracking-map') as HTMLElement;
-    if (!el) return;
-    this.map = L.map(el, {
+    const element = document.querySelector('.tracking-map') as HTMLElement | null;
+    if (!element) {
+      return;
+    }
+    this.map = L.map(element, {
       center: [-16.5, -68.15],
       zoom: 13,
       zoomControl: true,
@@ -413,11 +467,11 @@ export class ServiceTrackingPage implements OnInit {
     setTimeout(() => this.map?.invalidateSize(), 200);
   }
 
-  private updateMapMarker(
-    serviceId: number,
-    status: ServiceTrackingStatus,
-  ): void {
-    if (!this.map) return;
+  private updateMapMarker(serviceId: number, status: ServiceTrackingStatus): void {
+    if (!this.map) {
+      return;
+    }
+
     const incidentLatLng: L.LatLngExpression = [
       status.incident_latitud,
       status.incident_longitud,
@@ -433,22 +487,17 @@ export class ServiceTrackingPage implements OnInit {
     if (!existing) {
       const operarioMarker = L.marker(operarioLatLng ?? incidentLatLng, {
         icon: this.operarioIcon,
-      }).addTo(this.map!);
+      }).addTo(this.map);
       const incidenteMarker = L.marker(incidentLatLng, {
         icon: this.incidentIcon,
-      }).addTo(this.map!);
-
-      operarioMarker.bindPopup(
-        `Servicio #${serviceId} - Operario<br/>Estado: ${status.service_state}`,
-      );
-      incidenteMarker.bindPopup(
-        `Servicio #${serviceId} - Incidente #${status.incident_id}`,
-      );
+      }).addTo(this.map);
+      operarioMarker.bindPopup(`Servicio #${serviceId} - Operario`);
+      incidenteMarker.bindPopup(`Servicio #${serviceId} - Incidente #${status.incident_id}`);
 
       const polyline = L.polyline(
-        operarioLatLng ? [operarioLatLng, incidentLatLng] : [incidentLatLng],
+        this.resolvePolylinePoints(status, operarioLatLng, incidentLatLng),
         { color: '#2563eb', weight: 3, opacity: 0.6, dashArray: '8 4' },
-      ).addTo(this.map!);
+      ).addTo(this.map);
 
       existing = { operario: operarioMarker, incidente: incidenteMarker };
       this.markers.set(serviceId, existing);
@@ -458,23 +507,47 @@ export class ServiceTrackingPage implements OnInit {
         existing.operario.setLatLng(operarioLatLng);
       }
       existing.incidente.setLatLng(incidentLatLng);
-
       const polyline = this.polylines.get(serviceId);
       if (polyline) {
-        const pts: L.LatLngExpression[] = operarioLatLng
-          ? [operarioLatLng, incidentLatLng]
-          : [incidentLatLng];
-        polyline.setLatLngs(pts);
+        polyline.setLatLngs(this.resolvePolylinePoints(status, operarioLatLng, incidentLatLng));
       }
     }
 
     const allBounds = L.latLngBounds([]);
-    this.markers.forEach((m) => {
-      allBounds.extend(m.incidente.getLatLng());
-      allBounds.extend(m.operario.getLatLng());
+    this.markers.forEach((markerSet) => {
+      allBounds.extend(markerSet.incidente.getLatLng());
+      allBounds.extend(markerSet.operario.getLatLng());
     });
     if (allBounds.isValid()) {
       this.map.fitBounds(allBounds, { padding: [50, 50] });
+    }
+  }
+
+  private resolvePolylinePoints(
+    status: ServiceTrackingStatus,
+    operarioLatLng: L.LatLngExpression | null,
+    incidentLatLng: L.LatLngExpression,
+  ): L.LatLngExpression[] {
+    const routePoints = status.route_points
+      ?.filter((point) => Array.isArray(point) && point.length >= 2)
+      .map((point) => [point[0], point[1]] as L.LatLngExpression);
+    if (routePoints && routePoints.length >= 2) {
+      return routePoints;
+    }
+    return operarioLatLng ? [operarioLatLng, incidentLatLng] : [incidentLatLng];
+  }
+
+  private removeServiceFromMap(serviceId: number): void {
+    const markerSet = this.markers.get(serviceId);
+    if (markerSet) {
+      markerSet.operario.remove();
+      markerSet.incidente.remove();
+      this.markers.delete(serviceId);
+    }
+    const polyline = this.polylines.get(serviceId);
+    if (polyline) {
+      polyline.remove();
+      this.polylines.delete(serviceId);
     }
   }
 }

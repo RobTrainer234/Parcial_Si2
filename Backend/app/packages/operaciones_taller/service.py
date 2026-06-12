@@ -27,6 +27,7 @@ from app.models import (
     Persona,
     Servicio,
     ServicioInforme,
+    ServicioUbicacion,
     ServicioRepuesto,
     SolicitudServicio,
     Taller,
@@ -61,6 +62,7 @@ from app.packages.seguridad_usuarios.security import utc_now
 
 from .ai_reports import build_dashboard_voice_report
 from .dependencies import WorkshopAdminContext
+from .realtime import publish_service_realtime_event
 from .schemas import (
     AssignedOperarioSummary,
     AssignOperarioRequest,
@@ -88,6 +90,7 @@ from .schemas import (
     WorkshopCatalogServiceResponse,
     WorkshopCatalogServiceUpdateRequest,
     DashboardCountItem,
+    DashboardKpiSourceMetadata,
     IncidentHeatmapPoint,
     IncidentZoneSummary,
     DashboardStuckServiceItem,
@@ -179,6 +182,8 @@ DASHBOARD_STUCK_THRESHOLDS_MINUTES: dict[str, int] = {
     "EN_REPARACION": 180,
     "ESPERANDO_REPUESTOS": 24 * 60,
 }
+DASHBOARD_TRACKING_STALE_MINUTES = 5
+DASHBOARD_TRACKING_SERVICE_STATES = {"ASIGNADO", "EN_CAMINO", "EN_SITIO", "EN_DIAGNOSTICO_FISICO"}
 DASHBOARD_ACTION_PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 DASHBOARD_SLA_RESPONSE_MINUTES = Decimal("15")
 DASHBOARD_SLA_OPERARIO_ASSIGNMENT_MINUTES = Decimal("30")
@@ -210,6 +215,7 @@ def _build_service_query():
         .joinedload(SolicitudServicio.incidente)
         .selectinload(Incidente.evidencias),
         joinedload(Servicio.operario).joinedload(Operario.persona),
+        selectinload(Servicio.ubicaciones),
     )
 
 
@@ -287,6 +293,7 @@ def _build_dashboard_service_query():
         joinedload(Servicio.solicitud).joinedload(SolicitudServicio.taller),
         joinedload(Servicio.operario).joinedload(Operario.persona),
         joinedload(Servicio.pago),
+        selectinload(Servicio.ubicaciones),
     )
 
 
@@ -1745,6 +1752,73 @@ def _minutes_between(start: datetime | None, end: datetime | None) -> Decimal | 
     return _quantize_currency(minutes)
 
 
+def _min_decimal(values: list[Decimal]) -> Decimal | None:
+    if not values:
+        return None
+    return _quantize_currency(min(values))
+
+
+def _max_decimal(values: list[Decimal]) -> Decimal | None:
+    if not values:
+        return None
+    return _quantize_currency(max(values))
+
+
+def _get_service_start_reference(service: Servicio) -> datetime | None:
+    return service.solicitud.fecha_respuesta or service.created_at
+
+
+def _get_first_bitacora_timestamp(
+    *,
+    service_bitacoras: list[Bitacora],
+    action: str,
+) -> datetime | None:
+    matching_events = [
+        event
+        for event in service_bitacoras
+        if event.accion == action
+    ]
+    if not matching_events:
+        return None
+    first_event = min(matching_events, key=lambda item: (item.fecha_hora, item.id_bitacora))
+    return first_event.fecha_hora
+
+
+def _get_arrival_start_end(
+    *,
+    service: Servicio,
+    service_bitacoras: list[Bitacora],
+) -> tuple[datetime | None, datetime | None]:
+    start_at = _get_first_bitacora_timestamp(
+        service_bitacoras=service_bitacoras,
+        action="NAVEGACION_INICIADA",
+    ) or service.fecha_inicio
+    end_at = _get_first_bitacora_timestamp(
+        service_bitacoras=service_bitacoras,
+        action="OPERARIO_EN_SITIO",
+    ) or service.fecha_llegada
+    return start_at, end_at
+
+
+def _get_last_service_location(service: Servicio) -> ServicioUbicacion | None:
+    if not service.ubicaciones:
+        return None
+    return max(
+        service.ubicaciones,
+        key=lambda item: (item.fecha_hora, item.id_ubicacion),
+    )
+
+
+def _is_service_location_stale(
+    *,
+    location: ServicioUbicacion | None,
+    now: datetime,
+) -> bool:
+    if location is None:
+        return False
+    return location.fecha_hora < now - timedelta(minutes=DASHBOARD_TRACKING_STALE_MINUTES)
+
+
 def _extract_state_value(payload: Any, *keys: str) -> str | None:
     if not isinstance(payload, dict):
         return None
@@ -1967,11 +2041,13 @@ def _get_dashboard_kpis(
     payments_in_period: list[Pago],
     ratings_in_period: list[Calificacion],
     service_bitacoras_by_service_id: dict[int, list[Bitacora]],
+    now: datetime,
 ) -> WorkshopDashboardKpiResponse:
     pending_requests = sum(1 for request in requests_in_period if request.estado == "PENDIENTE")
     accepted_requests = sum(1 for request in requests_in_period if request.estado == "ACEPTADA")
     rejected_requests = sum(1 for request in requests_in_period if request.estado == "RECHAZADA")
     expired_requests = sum(1 for request in requests_in_period if request.estado == "EXPIRADA")
+    cancelled_requests = sum(1 for request in requests_in_period if request.estado == "CANCELADA")
     active_services = sum(1 for service in services_in_period if service.estado in DASHBOARD_ACTIVE_SERVICE_STATES)
     completed_services = sum(
         1 for service in services_in_period if service.estado in DASHBOARD_COMPLETED_SERVICE_STATES
@@ -1990,12 +2066,34 @@ def _get_dashboard_kpis(
         sum((payment.monto for payment in payments_in_period if payment.estado == "CONFIRMADO"), Decimal("0"))
     )
     average_rating = _average_decimal([Decimal(rating.estrellas) for rating in ratings_in_period])
-    acceptance_times = [
+    assignment_times = [
         minutes
         for minutes in (
             _minutes_between(request.fecha_envio, request.fecha_respuesta)
             for request in requests_in_period
             if request.estado == "ACEPTADA"
+        )
+        if minutes is not None
+    ]
+    operator_assignment_times = [
+        minutes
+        for minutes in (
+            _minutes_between(
+                _get_service_start_reference(service),
+                service.fecha_asignacion_operario,
+            )
+            for service in services_in_period
+        )
+        if minutes is not None
+    ]
+    arrival_times = [
+        minutes
+        for minutes in (
+            _minutes_between(*_get_arrival_start_end(
+                service=service,
+                service_bitacoras=service_bitacoras_by_service_id.get(service.id_servicio, []),
+            ))
+            for service in services_in_period
         )
         if minutes is not None
     ]
@@ -2024,18 +2122,16 @@ def _get_dashboard_kpis(
         )
         if minutes is not None
     ]
-    arrival_times = [
-        minutes
-        for minutes in (
-            _minutes_between(service.solicitud.incidente.fecha_hora, service.fecha_llegada)
-            for service in services_in_period
-        )
-        if minutes is not None
-    ]
     assignment_to_arrival_times = [
         minutes
         for minutes in (
-            _minutes_between(service.fecha_asignacion_operario, service.fecha_llegada)
+            _minutes_between(
+                service.fecha_asignacion_operario,
+                _get_arrival_start_end(
+                    service=service,
+                    service_bitacoras=service_bitacoras_by_service_id.get(service.id_servicio, []),
+                )[1],
+            )
             for service in services_in_period
         )
         if minutes is not None
@@ -2050,6 +2146,48 @@ def _get_dashboard_kpis(
             for event in service_bitacoras_by_service_id.get(service.id_servicio, [])
         ):
             no_rework_count += 1
+    assigned_services_count = sum(1 for service in services_in_period if service.fecha_asignacion_operario is not None)
+    unassigned_services_count = sum(
+        1
+        for service in services_in_period
+        if service.estado in DASHBOARD_ACTIVE_SERVICE_STATES and service.fecha_asignacion_operario is None
+    )
+    arrived_services_count = sum(
+        1
+        for service in services_in_period
+        if _minutes_between(
+            *_get_arrival_start_end(
+                service=service,
+                service_bitacoras=service_bitacoras_by_service_id.get(service.id_servicio, []),
+            )
+        ) is not None
+    )
+    completed_services_count = sum(1 for service in services_in_period if service.fecha_fin is not None)
+    services_without_operator = sum(
+        1
+        for service in services_in_period
+        if service.estado in DASHBOARD_ACTIVE_SERVICE_STATES and service.id_persona_operario is None
+    )
+    services_without_location = 0
+    stale_tracking_services = 0
+    services_exceeding_arrival_threshold = 0
+    arrival_threshold_minutes = Decimal(str(DASHBOARD_STUCK_THRESHOLDS_MINUTES.get("EN_CAMINO", 60)))
+    for service in services_in_period:
+        if service.estado not in DASHBOARD_TRACKING_SERVICE_STATES:
+            continue
+        last_location = _get_last_service_location(service)
+        if last_location is None:
+            services_without_location += 1
+        elif _is_service_location_stale(location=last_location, now=now):
+            stale_tracking_services += 1
+        if service.estado == "EN_CAMINO":
+            arrival_start_at, _ = _get_arrival_start_end(
+                service=service,
+                service_bitacoras=service_bitacoras_by_service_id.get(service.id_servicio, []),
+            )
+            minutes_in_route = _minutes_between(arrival_start_at, now)
+            if minutes_in_route is not None and minutes_in_route > arrival_threshold_minutes:
+                services_exceeding_arrival_threshold += 1
     cancelled_incident_ids = {
         request.id_incidente
         for request in requests_in_period
@@ -2081,6 +2219,7 @@ def _get_dashboard_kpis(
         accepted_requests=accepted_requests,
         rejected_requests=rejected_requests,
         expired_requests=expired_requests,
+        cancelled_requests=cancelled_requests,
         active_services=active_services,
         completed_services=completed_services,
         paid_services=paid_services,
@@ -2088,14 +2227,29 @@ def _get_dashboard_kpis(
         total_revenue=total_revenue,
         average_rating=average_rating,
         first_contact_resolution_rate=_percentage(no_rework_count, len(finalized_services)),
-        average_acceptance_time_minutes=_average_decimal(acceptance_times),
+        average_assignment_time_minutes=_average_decimal(assignment_times),
+        min_assignment_time_minutes=_min_decimal(assignment_times),
+        max_assignment_time_minutes=_max_decimal(assignment_times),
+        accepted_request_count=accepted_requests,
+        average_operator_assignment_time_minutes=_average_decimal(operator_assignment_times),
+        unassigned_services_count=unassigned_services_count,
+        assigned_services_count=assigned_services_count,
+        average_arrival_time_minutes=_average_decimal(arrival_times),
+        min_arrival_time_minutes=_min_decimal(arrival_times),
+        max_arrival_time_minutes=_max_decimal(arrival_times),
+        arrived_services_count=arrived_services_count,
+        average_acceptance_time_minutes=_average_decimal(assignment_times),
         average_report_to_workshop_assignment_minutes=_average_decimal(
             report_to_workshop_assignment_times
         ),
         average_operario_assignment_time_minutes=_average_decimal(operario_assignment_times),
-        average_arrival_time_minutes=_average_decimal(arrival_times),
         average_assignment_to_arrival_minutes=_average_decimal(assignment_to_arrival_times),
         average_completion_time_minutes=_average_decimal(completion_times),
+        completed_services_count=completed_services_count,
+        services_without_operator=services_without_operator,
+        services_without_location=services_without_location,
+        stale_tracking_services=stale_tracking_services,
+        services_exceeding_arrival_threshold=services_exceeding_arrival_threshold,
         cancelled_cases=len(cancelled_incident_ids),
         unattended_cases=len(unattended_incident_ids),
         sla_compliance_rate=sla_compliance_rate,
@@ -2140,6 +2294,71 @@ def _get_operations_metrics(
             now=now,
         ),
     )
+
+
+def _get_kpi_source_metadata() -> list[DashboardKpiSourceMetadata]:
+    return [
+        DashboardKpiSourceMetadata(
+            kpi_name="assignment_time",
+            start_event="SOLICITUD_ENVIADA",
+            end_event="SOLICITUD_ACEPTADA",
+            start_field="solicitud_servicio.fecha_envio",
+            end_field="solicitud_servicio.fecha_respuesta",
+            source_tables=["solicitud_servicio", "incidente", "servicio", "taller"],
+            source_fields=[
+                "solicitud_servicio.fecha_envio",
+                "solicitud_servicio.fecha_respuesta",
+                "solicitud_servicio.estado",
+                "solicitud_servicio.id_taller",
+            ],
+            notes="Solo considera solicitudes aceptadas dentro del taller y periodo filtrado.",
+        ),
+        DashboardKpiSourceMetadata(
+            kpi_name="operator_assignment_time",
+            start_event="SOLICITUD_ACEPTADA_O_SERVICIO_CREADO",
+            end_event="OPERARIO_ASIGNADO",
+            start_field="solicitud_servicio.fecha_respuesta | servicio.created_at",
+            end_field="servicio.fecha_asignacion_operario",
+            source_tables=["servicio", "solicitud_servicio", "operario", "taller"],
+            source_fields=[
+                "solicitud_servicio.fecha_respuesta",
+                "servicio.created_at",
+                "servicio.fecha_asignacion_operario",
+                "servicio.id_persona_operario",
+            ],
+            notes="Usa fecha_respuesta como inicio y recurre a servicio.created_at cuando hace falta.",
+        ),
+        DashboardKpiSourceMetadata(
+            kpi_name="arrival_time",
+            start_event="NAVEGACION_INICIADA",
+            end_event="OPERARIO_EN_SITIO",
+            start_field="bitacora.fecha_hora | servicio.fecha_inicio",
+            end_field="bitacora.fecha_hora | servicio.fecha_llegada",
+            source_tables=["bitacora", "servicio", "servicio_ubicacion", "solicitud_servicio", "incidente"],
+            source_fields=[
+                "bitacora.accion",
+                "bitacora.fecha_hora",
+                "servicio.fecha_inicio",
+                "servicio.fecha_llegada",
+                "servicio_ubicacion.fecha_hora",
+            ],
+            notes="Prioriza eventos de bitacora NAVEGACION_INICIADA y OPERARIO_EN_SITIO; si faltan, usa los timestamps del servicio.",
+        ),
+        DashboardKpiSourceMetadata(
+            kpi_name="completion_time",
+            start_event="SERVICIO_INICIADO",
+            end_event="SERVICIO_FINALIZADO",
+            start_field="servicio.fecha_inicio",
+            end_field="servicio.fecha_fin",
+            source_tables=["servicio", "bitacora"],
+            source_fields=[
+                "servicio.fecha_inicio",
+                "servicio.fecha_fin",
+                "servicio.estado",
+            ],
+            notes="No inventa duraciones si falta alguno de los timestamps.",
+        ),
+    ]
 
 
 def _build_monthly_revenue(
@@ -2548,7 +2767,7 @@ def _get_dashboard_action_items(
 
 def get_workshop_dashboard_overview(
     *,
-    admin_context: WorkshopAdminContext,
+    admin_context: WorkshopAdminContext | WorkshopAccessContext,
     db: Session,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -2665,7 +2884,9 @@ def get_workshop_dashboard_overview(
             payments_in_period=payments_in_period,
             ratings_in_period=ratings_in_period,
             service_bitacoras_by_service_id=bitacoras_by_service_id,
+            now=now,
         ),
+        kpi_sources=_get_kpi_source_metadata(),
         operations=operations,
         financial=financial,
         operarios=_get_operario_metrics(
@@ -2690,7 +2911,7 @@ def get_workshop_dashboard_overview(
 
 def create_workshop_dashboard_voice_report(
     *,
-    admin_context: WorkshopAdminContext,
+    admin_context: WorkshopAdminContext | WorkshopAccessContext,
     db: Session,
     audio_file: UploadFile,
     date_from: datetime | None = None,
@@ -4148,6 +4369,11 @@ def save_repair_report(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Repair report could not be persisted.",
         ) from exc
+    publish_service_realtime_event(
+        db=db,
+        service_id=service.id_servicio,
+        event_type="SERVICE_COMPLETED",
+    )
 
     db.expire_all()
     refreshed_service = _get_assigned_operario_service(
@@ -4346,6 +4572,11 @@ def assign_operario_to_service(
         ) from exc
 
     _auto_dispatch_notifications(target_user=operario_user, db=db)
+    publish_service_realtime_event(
+        db=db,
+        service_id=service.id_servicio,
+        event_type="SERVICE_ASSIGNED",
+    )
 
     refreshed_service = _get_workshop_service(
         db=db,
@@ -4577,6 +4808,11 @@ def _accept_workshop_request(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Accepted service could not be loaded.",
         )
+    publish_service_realtime_event(
+        db=db,
+        service_id=refreshed_service.id_servicio,
+        event_type="SERVICE_STATUS_UPDATED",
+    )
     return _build_accept_response(
         request_row=refreshed_request,
         service=refreshed_service,

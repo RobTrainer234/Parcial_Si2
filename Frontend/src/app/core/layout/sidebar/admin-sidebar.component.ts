@@ -193,6 +193,7 @@ export class AdminSidebarComponent {
     badge?: string;
   }> = [
     { label: 'Panel', path: '/admin/dashboard', exact: true },
+    { label: 'Reportes', path: '/admin/reports', exact: true },
     { label: 'Gestión del Taller', path: '/admin/workshop', exact: true },
     { label: 'Solicitudes', path: '/admin/requests' },
     { label: 'Asignaciones', path: '/admin/services/waiting-assignment' },

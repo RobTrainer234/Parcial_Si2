@@ -15,6 +15,7 @@ class ServiceTrackingMap extends StatefulWidget {
     required this.operarioLongitud,
     required this.historyPoints,
     required this.lastLocationAt,
+    this.routePoints,
     this.hasArrived = false,
   });
 
@@ -24,6 +25,7 @@ class ServiceTrackingMap extends StatefulWidget {
   final double? operarioLongitud;
   final List<TrackingHistoryPointModel> historyPoints;
   final DateTime? lastLocationAt;
+  final List<LatLng>? routePoints;
   final bool hasArrived;
 
   @override
@@ -80,14 +82,18 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
 
   @override
   Widget build(BuildContext context) {
-    final incidentPoint = _toLatLng(widget.incidentLatitud, widget.incidentLongitud);
-    final operarioPoint = _toLatLng(widget.operarioLatitud, widget.operarioLongitud);
+    final incidentPoint =
+        _toLatLng(widget.incidentLatitud, widget.incidentLongitud);
+    final operarioPoint =
+        _toLatLng(widget.operarioLatitud, widget.operarioLongitud);
     final historyLatLng = widget.historyPoints
         .map((point) => _toLatLng(point.latitud, point.longitud))
         .whereType<LatLng>()
         .toList();
+    final routeLatLng = widget.routePoints ?? const <LatLng>[];
 
     final allPoints = <LatLng>[
+      ...routeLatLng,
       ...historyLatLng,
       if (incidentPoint != null) incidentPoint,
       if (operarioPoint != null) operarioPoint,
@@ -99,7 +105,7 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
 
     final center = operarioPoint ?? incidentPoint ?? allPoints.first;
     final zoom = operarioPoint != null ? 14.0 : 15.0;
-    final hasRoute = operarioPoint != null && incidentPoint != null;
+    final hasDirectRoute = operarioPoint != null && incidentPoint != null;
 
     final markers = <Marker>[
       if (incidentPoint != null)
@@ -148,10 +154,7 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
                       widget.operarioLongitud,
                     );
                     if (op != null) {
-                      final dist = _distance(
-                        event.camera.center,
-                        op,
-                      );
+                      final dist = _distance(event.camera.center, op);
                       if (dist > 0.01) {
                         setState(() => _autoFollow = false);
                       }
@@ -161,11 +164,30 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
               ),
               children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'si2.auxilio_vial',
                 ),
-                if (hasRoute)
+                if (routeLatLng.length >= 2)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: routeLatLng,
+                        strokeWidth: 4,
+                        color: Colors.indigo.shade500,
+                      ),
+                    ],
+                  )
+                else if (historyLatLng.length >= 2)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: historyLatLng,
+                        strokeWidth: 4,
+                        color: Colors.blue.shade600,
+                      ),
+                    ],
+                  )
+                else if (hasDirectRoute)
                   PolylineLayer(
                     polylines: [
                       Polyline(
@@ -173,16 +195,6 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
                         strokeWidth: 3,
                         color: Colors.blue.shade400,
                         pattern: StrokePattern.dashed(segments: [10, 6]),
-                      ),
-                    ],
-                  ),
-                if (historyLatLng.length >= 2)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: historyLatLng,
-                        strokeWidth: 4,
-                        color: Colors.blue.shade600,
                       ),
                     ],
                   ),
@@ -198,19 +210,16 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
                   elevation: 4,
                   borderRadius: BorderRadius.circular(12),
                   color: Colors.green.shade600,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        const Icon(Icons.check_circle, color: Colors.white),
-                        const SizedBox(width: 10),
+                        Icon(Icons.check_circle, color: Colors.white),
+                        SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             'El operario llegó al lugar',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,
                               fontSize: 15,
@@ -248,10 +257,8 @@ class _ServiceTrackingMapState extends State<ServiceTrackingMap>
               right: 8,
               bottom: 8,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(8),
@@ -284,6 +291,7 @@ LatLng? _toLatLng(double? latitud, double? longitud) {
 class _PulsingMarker extends StatelessWidget {
   final double scale;
   final String label;
+
   const _PulsingMarker({required this.scale, required this.label});
 
   @override
@@ -304,7 +312,11 @@ class _PulsingMarker extends StatelessWidget {
             ],
           ),
           padding: EdgeInsets.all(12 * scale),
-          child: Icon(Icons.local_shipping, color: Colors.white, size: 24 * scale),
+          child: Icon(
+            Icons.local_shipping,
+            color: Colors.white,
+            size: 24 * scale,
+          ),
         ),
       ],
     );
@@ -366,6 +378,7 @@ class _MarkerBubble extends StatelessWidget {
   final IconData icon;
   final Color color;
   final String label;
+
   const _MarkerBubble({
     required this.icon,
     required this.color,

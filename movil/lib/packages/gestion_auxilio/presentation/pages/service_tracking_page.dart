@@ -5,7 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/auth/auth_controller.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/service_realtime_socket.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
@@ -30,6 +32,12 @@ class ServiceTrackingPage extends ConsumerStatefulWidget {
 
 class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
   Timer? _refreshTimer;
+  ServiceRealtimeSocketSession? _realtimeSession;
+  StreamSubscription<ServiceRealtimeEvent>? _realtimeEventSubscription;
+  StreamSubscription<ServiceRealtimeConnectionState>? _realtimeStateSubscription;
+  ServiceRealtimeConnectionState _realtimeState =
+      ServiceRealtimeConnectionState.disconnected;
+  DateTime? _lastRealtimeEventAt;
   bool _showHistory = false;
   bool _dismissedRatingBanner = false;
   int _previousEta = -1;
@@ -44,12 +52,60 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
           .read(serviceTrackingProvider(widget.serviceId).notifier)
           .refreshSilently();
     });
+    _connectRealtime();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _realtimeEventSubscription?.cancel();
+    _realtimeStateSubscription?.cancel();
+    _realtimeSession?.dispose();
     super.dispose();
+  }
+
+  void _connectRealtime() {
+    final token = ref.read(authControllerProvider).valueOrNull?.accessToken;
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    final realtimeService = ref.read(serviceRealtimeSocketServiceProvider);
+    final session = realtimeService.connectToService(
+      serviceId: widget.serviceId,
+      token: token,
+    );
+    _realtimeSession = session;
+    _realtimeEventSubscription = session.events.listen((event) {
+      ref
+          .read(serviceTrackingProvider(widget.serviceId).notifier)
+          .applyRealtimeEvent(event);
+      if (mounted) {
+        setState(() {
+          _lastRealtimeEventAt = DateTime.now();
+        });
+      }
+    });
+    _realtimeStateSubscription = session.states.listen((nextState) {
+      if (mounted) {
+        setState(() {
+          _realtimeState = nextState;
+        });
+      }
+    });
+  }
+
+  String _realtimeStatusLabel() {
+    switch (_realtimeState) {
+      case ServiceRealtimeConnectionState.connected:
+        return 'En vivo';
+      case ServiceRealtimeConnectionState.reconnecting:
+        return 'Reconectando';
+      case ServiceRealtimeConnectionState.disconnected:
+        if (_lastRealtimeEventAt == null) {
+          return 'Sin conexion en tiempo real';
+        }
+        return 'Actualizado ${_realtimeElapsedLabel(_lastRealtimeEventAt)}';
+    }
   }
 
   String _formatEta(int? seconds) {
@@ -150,6 +206,10 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
                 .refresh(),
             child: ListView(
               children: [
+                AppCard(
+                  child: Text(_realtimeStatusLabel()),
+                ),
+                const SizedBox(height: 12),
                 SizedBox(
                   height: 340,
                   child: Stack(
@@ -161,6 +221,7 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
                         operarioLongitud: status.lastOperarioLongitud,
                         historyPoints: validHistory,
                         lastLocationAt: status.lastLocationAt,
+                        routePoints: status.routePoints,
                         hasArrived: arrived,
                       ),
                       Positioned(
@@ -220,6 +281,51 @@ class _ServiceTrackingPageState extends ConsumerState<ServiceTrackingPage> {
                     serviceId: widget.serviceId,
                     hasLiveLocation: hasLiveLocation,
                     arrived: arrived,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: AppCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Ubicacion del operario',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        if (_hasLastLocation(status)) ...[
+                          Text(
+                            'Ultima ubicacion registrada',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${status.lastOperarioLatitud!.toStringAsFixed(5)}, ${status.lastOperarioLongitud!.toStringAsFixed(5)}',
+                          ),
+                          if (status.lastLocationAt != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Actualizada: ${_formatDate(status.lastLocationAt)}',
+                            ),
+                          ],
+                          if (status.currentDistanceMeters != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Distancia aproximada: ${(status.currentDistanceMeters! / 1000).toStringAsFixed(2)} km',
+                            ),
+                          ],
+                          if (status.etaText != null) ...[
+                            const SizedBox(height: 4),
+                            Text('ETA: ${status.etaText}'),
+                          ],
+                        ] else
+                          const Text(
+                            'Aun no hay ubicacion en tiempo real del operario.',
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 if (recentHistory.isNotEmpty) ...[
@@ -978,6 +1084,11 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
+bool _hasLastLocation(dynamic status) {
+  return status.lastOperarioLatitud != null &&
+      status.lastOperarioLongitud != null;
+}
+
 String _friendlyState(String state) {
   switch (state) {
     case 'EN_ESPERA_ASIGNACION':
@@ -1003,6 +1114,20 @@ String _friendlyState(String state) {
     default:
       return localizeStatusLabel(state);
   }
+}
+
+String _realtimeElapsedLabel(DateTime? value) {
+  if (value == null) {
+    return 'sin actualizaciones recientes';
+  }
+  final difference = DateTime.now().difference(value);
+  if (difference.inSeconds < 60) {
+    return 'hace ${difference.inSeconds}s';
+  }
+  if (difference.inMinutes < 60) {
+    return 'hace ${difference.inMinutes} min';
+  }
+  return 'hace ${difference.inHours} h';
 }
 
 String _mapTrackingError(Object error) {

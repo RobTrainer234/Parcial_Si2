@@ -7,7 +7,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/auth/auth_controller.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/service_realtime_socket.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/utils/user_facing_text.dart';
 import '../../../../core/widgets/app_card.dart';
@@ -39,6 +41,12 @@ class _OperatorServiceDetailPageState
   bool _isSendingLocation = false;
   bool _isAcknowledgingProfile = false;
   bool _isOpeningMaps = false;
+  ServiceRealtimeSocketSession? _realtimeSession;
+  StreamSubscription<ServiceRealtimeEvent>? _realtimeEventSubscription;
+  StreamSubscription<ServiceRealtimeConnectionState>? _realtimeStateSubscription;
+  ServiceRealtimeConnectionState _realtimeState =
+      ServiceRealtimeConnectionState.disconnected;
+  DateTime? _lastRealtimeEventAt;
   bool _showServiceInfo = true;
   bool _showDiagnosis = false;
   bool _showTimeline = true;
@@ -53,12 +61,60 @@ class _OperatorServiceDetailPageState
           .read(operatorServiceDetailProvider(widget.serviceId).notifier)
           .refresh();
     });
+    _connectRealtime();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _realtimeEventSubscription?.cancel();
+    _realtimeStateSubscription?.cancel();
+    _realtimeSession?.dispose();
     super.dispose();
+  }
+
+  void _connectRealtime() {
+    final token = ref.read(authControllerProvider).valueOrNull?.accessToken;
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    final realtimeService = ref.read(serviceRealtimeSocketServiceProvider);
+    final session = realtimeService.connectToService(
+      serviceId: widget.serviceId,
+      token: token,
+    );
+    _realtimeSession = session;
+    _realtimeEventSubscription = session.events.listen((_) async {
+      await ref
+          .read(operatorServiceDetailProvider(widget.serviceId).notifier)
+          .refresh();
+      if (mounted) {
+        setState(() {
+          _lastRealtimeEventAt = DateTime.now();
+        });
+      }
+    });
+    _realtimeStateSubscription = session.states.listen((nextState) {
+      if (mounted) {
+        setState(() {
+          _realtimeState = nextState;
+        });
+      }
+    });
+  }
+
+  String _realtimeStatusLabel() {
+    switch (_realtimeState) {
+      case ServiceRealtimeConnectionState.connected:
+        return 'En vivo';
+      case ServiceRealtimeConnectionState.reconnecting:
+        return 'Reconectando';
+      case ServiceRealtimeConnectionState.disconnected:
+        if (_lastRealtimeEventAt == null) {
+          return 'Sin conexion en tiempo real';
+        }
+        return 'Actualizado ${_elapsedRealtimeLabel(_lastRealtimeEventAt!)}';
+    }
   }
 
   Future<void> _runMainAction(
@@ -367,6 +423,8 @@ class _OperatorServiceDetailPageState
                 .refresh(),
             child: ListView(
               children: [
+                AppCard(child: Text(_realtimeStatusLabel())),
+                const SizedBox(height: 12),
                 SizedBox(
                   height: 380,
                   child: Stack(
@@ -558,10 +616,27 @@ class _OperatorServiceDetailPageState
                               value: detail.requiresTow! ? 'Si' : 'No',
                             ),
                           _InfoRow(
+                            label: 'Ubicacion del cliente',
+                            value: _formatClientLocation(
+                              incidentLatitud,
+                              incidentLongitud,
+                            ),
+                          ),
+                          _InfoRow(
                             label: 'Evidencias',
                             value:
                                 '${detail.evidenceSummary.images} imagen(es), ${detail.evidenceSummary.audio} audio(s)',
                           ),
+                          if (_formatImageLabels(detail.imageLabels) != null)
+                            _InfoRow(
+                              label: 'Etiquetas de imagen',
+                              value: _formatImageLabels(detail.imageLabels)!,
+                            ),
+                          if (detail.visualEvidenceTags.isNotEmpty)
+                            _InfoRow(
+                              label: 'Evidencias visuales',
+                              value: detail.visualEvidenceTags.join(', '),
+                            ),
                           if (detail.audioTranscript != null &&
                               detail.audioTranscript!.trim().isNotEmpty)
                             _InfoRow(
@@ -1591,6 +1666,47 @@ String _humanizeTimelineAction(String action) {
   }
 }
 
+String? _formatImageLabels(dynamic value) {
+  if (value is List) {
+    final labels = value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    return labels.isEmpty ? null : labels.join(', ');
+  }
+  if (value is Map) {
+    final parts = <String>[];
+    value.forEach((key, item) {
+      final rendered = item?.toString().trim();
+      if (rendered != null && rendered.isNotEmpty) {
+        parts.add('$key: $rendered');
+      }
+    });
+    return parts.isEmpty ? null : parts.join(', ');
+  }
+  if (value is String && value.trim().isNotEmpty) {
+    return value.trim();
+  }
+  return null;
+}
+
+String _formatClientLocation(double? latitud, double? longitud) {
+  if (latitud == null || longitud == null) {
+    return 'Ubicacion del cliente no disponible';
+  }
+  return '${latitud.toStringAsFixed(5)}, ${longitud.toStringAsFixed(5)}';
+}
+
+String _elapsedRealtimeLabel(DateTime value) {
+  final difference = DateTime.now().difference(value);
+  if (difference.inSeconds < 60) {
+    return 'hace ${difference.inSeconds}s';
+  }
+  if (difference.inMinutes < 60) {
+    return 'hace ${difference.inMinutes} min';
+  }
+  return 'hace ${difference.inHours} h';
+}
 class _FriendlyLocationException implements Exception {
   final String message;
 

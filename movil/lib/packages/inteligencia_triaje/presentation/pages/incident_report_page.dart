@@ -19,11 +19,7 @@ import '../../../seguridad_usuarios/presentation/controllers/profile_controller.
 import '../../data/models/specialty_model.dart';
 import '../controllers/incident_report_controller.dart';
 
-enum _LocationUiState {
-  pending,
-  success,
-  error,
-}
+enum _LocationUiState { pending, success, error }
 
 class IncidentReportPage extends ConsumerStatefulWidget {
   const IncidentReportPage({super.key});
@@ -198,8 +194,9 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
 
   void _removeImage(XFile image) {
     setState(() {
-      _selectedImages =
-          _selectedImages.where((item) => item.path != image.path).toList();
+      _selectedImages = _selectedImages
+          .where((item) => item.path != image.path)
+          .toList();
     });
   }
 
@@ -238,10 +235,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
         });
       });
     } catch (_) {
-      _showMessage(
-        'No se pudo iniciar la grabación de audio.',
-        isError: true,
-      );
+      _showMessage('No se pudo iniciar la grabación de audio.', isError: true);
     }
   }
 
@@ -261,10 +255,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
       _recordingTimer?.cancel();
       if (!mounted) return;
       setState(() => _isRecordingAudio = false);
-      _showMessage(
-        'No se pudo finalizar la grabación.',
-        isError: true,
-      );
+      _showMessage('No se pudo finalizar la grabación.', isError: true);
     }
   }
 
@@ -319,10 +310,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
     }
 
     if (_selectedLatitud != null && _selectedLongitud != null) {
-      return (
-        latitud: _selectedLatitud!,
-        longitud: _selectedLongitud!,
-      );
+      return (latitud: _selectedLatitud!, longitud: _selectedLongitud!);
     }
 
     return null;
@@ -406,7 +394,8 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
     }
 
     final description = _descController.text.trim();
-    final hasAudio = _recordedAudioPath != null && _recordedAudioPath!.isNotEmpty;
+    final hasAudio =
+        _recordedAudioPath != null && _recordedAudioPath!.isNotEmpty;
     if (description.isEmpty && _selectedImages.isEmpty && !hasAudio) {
       _showMessage(
         'Agrega una descripción, una foto o un audio para reportar el incidente.',
@@ -426,19 +415,28 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      final result =
-          await ref.read(incidentSubmitProvider.notifier).submitIncident(
-                vehicleId: _selectedVehicle!.idVehiculo,
-                latitud: coordinates.latitud,
-                longitud: coordinates.longitud,
-                descripcionCliente: description,
-                specialtyId: _selectedSpecialty!.idEspecialidad,
-                images: _selectedImages,
-                audioPath: _recordedAudioPath,
-              );
+      final result = await ref
+          .read(incidentSubmitProvider.notifier)
+          .submitIncident(
+            vehicleId: _selectedVehicle!.idVehiculo,
+            latitud: coordinates.latitud,
+            longitud: coordinates.longitud,
+            descripcionCliente: description,
+            specialtyId: _selectedSpecialty!.idEspecialidad,
+            specialtyLabel: _specialtyDisplayName(_selectedSpecialty!),
+            images: _selectedImages,
+            audioPath: _recordedAudioPath,
+          );
 
       if (mounted) {
-        context.go(AppRoutes.incidentReported, extra: result);
+        if (result.wasQueued) {
+          context.go(
+            AppRoutes.pendingIncidents,
+            extra: 'Emergencia guardada pendiente de sincronizacion.',
+          );
+        } else if (result.onlineResponse != null) {
+          context.go(AppRoutes.incidentReported, extra: result.onlineResponse);
+        }
       }
     } catch (e) {
       if (e is ApiException) {
@@ -455,8 +453,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
           message =
               'No se pudo enviar el reporte por un problema del servidor.';
         } else {
-          message =
-              'No se pudo conectar con el servidor. Revisa tu conexión.';
+          message = 'No se pudo conectar con el servidor. Revisa tu conexión.';
         }
         _showMessage(message, isError: true);
       } else {
@@ -507,8 +504,9 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                     const Text('No se pudieron cargar tus vehículos.'),
                     const SizedBox(height: 8),
                     OutlinedButton(
-                      onPressed: () =>
-                          ref.read(profileControllerProvider.notifier).refresh(),
+                      onPressed: () => ref
+                          .read(profileControllerProvider.notifier)
+                          .refresh(),
                       child: const Text('Reintentar'),
                     ),
                   ],
@@ -540,8 +538,8 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
 
                 return Column(
                   children: profile.vehicles.map((vehicle) {
-                    final isSelected = _selectedVehicle?.idVehiculo ==
-                        vehicle.idVehiculo;
+                    final isSelected =
+                        _selectedVehicle?.idVehiculo == vehicle.idVehiculo;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: AppCard(
@@ -575,8 +573,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                                   Text(
                                     '${vehicle.placa} • ${vehicle.anio} • ${vehicle.colorNombre}',
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant,
+                                      color: theme.colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ],
@@ -614,9 +611,7 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                   ),
                   const SizedBox(height: 12),
                   Theme(
-                    data: theme.copyWith(
-                      dividerColor: Colors.transparent,
-                    ),
+                    data: theme.copyWith(dividerColor: Colors.transparent),
                     child: ExpansionTile(
                       tilePadding: EdgeInsets.zero,
                       childrenPadding: EdgeInsets.zero,
@@ -735,7 +730,8 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
 
                 return Column(
                   children: sorted.map((specialty) {
-                    final isSelected = _selectedSpecialty?.idEspecialidad ==
+                    final isSelected =
+                        _selectedSpecialty?.idEspecialidad ==
                         specialty.idEspecialidad;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
@@ -743,8 +739,8 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                         onTap: _isSubmitting
                             ? null
                             : () => setState(
-                                  () => _selectedSpecialty = specialty,
-                                ),
+                                () => _selectedSpecialty = specialty,
+                              ),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 14,
@@ -775,9 +771,10 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                                       specialty.descripcion!,
                                       style: theme.textTheme.bodySmall
                                           ?.copyWith(
-                                        color:
-                                            theme.colorScheme.onSurfaceVariant,
-                                      ),
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -808,7 +805,9 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   AppPrimaryButton(
-                    label: _isPickingImages ? 'Abriendo galería...' : 'Agregar fotos',
+                    label: _isPickingImages
+                        ? 'Abriendo galería...'
+                        : 'Agregar fotos',
                     icon: Icons.add_a_photo_outlined,
                     isLoading: _isPickingImages,
                     onPressed: _isSubmitting || _isPickingImages
@@ -854,16 +853,18 @@ class _IncidentReportPageState extends ConsumerState<IncidentReportPage> {
                           onPressed: _isSubmitting
                               ? null
                               : (_isRecordingAudio
-                                  ? _stopAudioRecording
-                                  : _startAudioRecording),
+                                    ? _stopAudioRecording
+                                    : _startAudioRecording),
                         ),
                       ),
                       const SizedBox(width: 8),
                       OutlinedButton(
                         onPressed:
-                            _isSubmitting || _isRecordingAudio || _recordedAudioPath == null
-                                ? null
-                                : _removeAudio,
+                            _isSubmitting ||
+                                _isRecordingAudio ||
+                                _recordedAudioPath == null
+                            ? null
+                            : _removeAudio,
                         child: const Text('Eliminar audio'),
                       ),
                     ],
@@ -905,17 +906,14 @@ class _SectionLabel extends StatelessWidget {
     return Text(
       title,
       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     );
   }
 }
 
 class _LocationStatusCard extends StatelessWidget {
-  const _LocationStatusCard({
-    required this.state,
-    required this.message,
-  });
+  const _LocationStatusCard({required this.state, required this.message});
 
   final _LocationUiState state;
   final String message;
@@ -925,20 +923,20 @@ class _LocationStatusCard extends StatelessWidget {
     final theme = Theme.of(context);
     final (icon, title, color) = switch (state) {
       _LocationUiState.pending => (
-          Icons.location_searching_rounded,
-          'Ubicación pendiente',
-          theme.colorScheme.primary,
-        ),
+        Icons.location_searching_rounded,
+        'Ubicación pendiente',
+        theme.colorScheme.primary,
+      ),
       _LocationUiState.success => (
-          Icons.check_circle_outline_rounded,
-          'Ubicación detectada',
-          Colors.green.shade600,
-        ),
+        Icons.check_circle_outline_rounded,
+        'Ubicación detectada',
+        Colors.green.shade600,
+      ),
       _LocationUiState.error => (
-          Icons.error_outline_rounded,
-          'No se pudo obtener ubicación',
-          theme.colorScheme.error,
-        ),
+        Icons.error_outline_rounded,
+        'No se pudo obtener ubicación',
+        theme.colorScheme.error,
+      ),
     };
 
     return Container(
@@ -963,10 +961,7 @@ class _LocationStatusCard extends StatelessWidget {
                   style: theme.textTheme.titleSmall?.copyWith(color: color),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  message,
-                  style: theme.textTheme.bodyMedium,
-                ),
+                Text(message, style: theme.textTheme.bodyMedium),
               ],
             ),
           ),

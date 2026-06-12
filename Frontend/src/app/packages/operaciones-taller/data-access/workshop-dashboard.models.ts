@@ -23,11 +23,23 @@ export interface DashboardMonthlyRevenueItem {
   revenue: number | string;
 }
 
+export interface DashboardKpiSourceMetadata {
+  kpi_name: string;
+  start_event?: string | null;
+  end_event?: string | null;
+  start_field?: string | null;
+  end_field?: string | null;
+  source_tables: string[];
+  source_fields: string[];
+  notes?: string | null;
+}
+
 export interface DashboardKpis {
   pending_requests: number;
   accepted_requests: number;
   rejected_requests: number;
   expired_requests: number;
+  cancelled_requests: number;
   active_services: number;
   completed_services: number;
   paid_services: number;
@@ -35,12 +47,27 @@ export interface DashboardKpis {
   total_revenue: number | string;
   average_rating: number | null;
   first_contact_resolution_rate: number | null;
+  average_assignment_time_minutes: number | null;
+  min_assignment_time_minutes: number | null;
+  max_assignment_time_minutes: number | null;
+  accepted_request_count: number;
+  average_operator_assignment_time_minutes: number | null;
+  unassigned_services_count: number;
+  assigned_services_count: number;
+  average_arrival_time_minutes: number | null;
+  min_arrival_time_minutes: number | null;
+  max_arrival_time_minutes: number | null;
+  arrived_services_count: number;
   average_acceptance_time_minutes: number | null;
   average_report_to_workshop_assignment_minutes: number | null;
   average_operario_assignment_time_minutes: number | null;
-  average_arrival_time_minutes: number | null;
   average_assignment_to_arrival_minutes: number | null;
   average_completion_time_minutes: number | null;
+  completed_services_count: number;
+  services_without_operator: number;
+  services_without_location: number;
+  stale_tracking_services: number;
+  services_exceeding_arrival_threshold: number;
   cancelled_cases: number;
   unattended_cases: number;
   sla_compliance_rate: number | null;
@@ -92,6 +119,7 @@ export interface DashboardFinancial {
 export interface DashboardOverviewResponse {
   period: DashboardPeriod;
   kpis: DashboardKpis;
+  kpi_sources: DashboardKpiSourceMetadata[];
   operations: DashboardOperations;
   financial: DashboardFinancial;
   operarios: DashboardOperarios;
