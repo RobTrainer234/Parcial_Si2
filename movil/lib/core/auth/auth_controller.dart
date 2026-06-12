@@ -1,6 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../packages/seguridad_usuarios/data/repositories/auth_repository.dart';
+import '../network/api_client.dart';
+import '../notifications/device_token_service.dart';
+import '../notifications/firebase_messaging_service.dart';
 import '../storage/secure_storage_service.dart';
 import '../storage/token_storage.dart';
 import 'auth_session.dart';
@@ -9,14 +13,15 @@ final authControllerProvider =
     StateNotifierProvider<AuthController, AsyncValue<AuthSession>>((ref) {
   final storage = ref.watch(tokenStorageProvider);
   final authRepository = ref.watch(authRepositoryProvider);
-  return AuthController(storage, authRepository);
+  return AuthController(storage, authRepository, ref);
 });
 
 class AuthController extends StateNotifier<AsyncValue<AuthSession>> {
   final TokenStorage _storage;
   final AuthRepository _authRepository;
+  final Ref _ref;
 
-  AuthController(this._storage, this._authRepository)
+  AuthController(this._storage, this._authRepository, this._ref)
       : super(const AsyncValue.loading()) {
     loadSession();
   }
@@ -44,6 +49,7 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession>> {
             user: userProfile,
           ),
         );
+        _registerDeviceToken();
       } else {
         state = const AsyncValue.data(AuthSession());
       }
@@ -71,9 +77,30 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession>> {
           user: response.user,
         ),
       );
+      _registerDeviceToken();
     } catch (e) {
       state = const AsyncValue.data(AuthSession());
       rethrow;
+    }
+  }
+
+  Future<void> _registerDeviceToken() async {
+    try {
+      final apiClient = _ref.read(apiClientProvider);
+      final messaging = FirebaseMessagingService.instance;
+      final tokenService = DeviceTokenService(apiClient);
+      await messaging.initialize();
+      final token = await messaging.getToken();
+      if (token == null) return;
+      String platform;
+      try {
+        platform = defaultTargetPlatform == TargetPlatform.iOS ? 'IOS' : 'ANDROID';
+      } catch (_) {
+        platform = 'ANDROID';
+      }
+      await tokenService.registerToken(deviceToken: token, platform: platform);
+    } catch (_) {
+      debugPrint('AuthController: device token registration skipped');
     }
   }
 

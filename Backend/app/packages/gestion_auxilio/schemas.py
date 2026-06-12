@@ -77,6 +77,9 @@ class NavigationStatusResponse(BaseModel):
     profile_acknowledged: bool
     has_arrived: bool
     arrival_threshold_meters: int
+    route_distance_meters: Decimal | None = None
+    route_duration_seconds: Decimal | None = None
+    route_geometry: dict[str, object] | list[object] | str | None = None
     message: str
 
 
@@ -249,6 +252,10 @@ class NotificationInboxItem(BaseModel):
     created_at: datetime
     sent_at: datetime | None = None
     read_at: datetime | None = None
+    type: str | None = None
+    entity_type: str | None = None
+    entity_id: int | None = None
+    route_suggested: str | None = None
 
 
 class NotificationReadResponse(BaseModel):
@@ -260,6 +267,11 @@ class NotificationReadResponse(BaseModel):
 
 class UnreadCountResponse(BaseModel):
     unread_count: int
+
+
+class MarkAllReadResponse(BaseModel):
+    marked_count: int
+    message: str
 
 
 class DispatchPendingResponse(BaseModel):

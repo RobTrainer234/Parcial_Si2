@@ -10,7 +10,15 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.packages.seguridad_usuarios.dependencies import require_operario_user
 
-from .dependencies import WorkshopAdminContext, require_workshop_admin_context
+from .dependencies import (
+    WorkshopAccessContext,
+    WorkshopAdminContext,
+    require_gerente_context,
+    require_workshop_access,
+    require_workshop_access_with_workshop_id,
+    require_workshop_admin_context,
+    require_workshop_read_context,
+)
 from .schemas import (
     AssignOperarioRequest,
     AssignOperarioResponse,
@@ -21,6 +29,7 @@ from .schemas import (
     RepairReportSnapshotResponse,
     UsedSparePartResponse,
     WaitingAssignmentServiceSummary,
+    WorkshopActiveServiceTrackingSummary,
     WorkshopCatalogServiceCreateRequest,
     WorkshopCatalogServiceResponse,
     WorkshopCatalogServiceUpdateRequest,
@@ -38,6 +47,7 @@ from .schemas import (
     WorkshopStaffAvailabilityUpdateRequest,
     WorkshopStaffCreateRequest,
     WorkshopStaffSummary,
+    WorkshopSummaryResponse,
 )
 from .service import (
     activate_workshop_catalog_service,
@@ -74,7 +84,7 @@ router = APIRouter(prefix="/workshop", tags=["workshop-requests"])
 def workshop_dashboard_overview(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> WorkshopDashboardOverviewResponse:
     return get_workshop_dashboard_overview(
@@ -87,7 +97,7 @@ def workshop_dashboard_overview(
 
 @router.get("/profile", response_model=WorkshopProfileResponse)
 def workshop_profile(
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> WorkshopProfileResponse:
     return get_workshop_profile(admin_context=admin_context, db=db)
@@ -112,7 +122,7 @@ def workshop_profile_update(
 @router.get("/catalog", response_model=list[WorkshopCatalogServiceResponse])
 def workshop_catalog_list(
     include_inactive: bool = False,
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[WorkshopCatalogServiceResponse]:
     return list_workshop_catalog_services(
@@ -213,7 +223,7 @@ def workshop_profile_media_upload(
 
 @router.get("/profile/media", response_model=list[WorkshopMediaFileResponse])
 def workshop_profile_media_list(
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[WorkshopMediaFileResponse]:
     return list_workshop_media_files(admin_context=admin_context, db=db)
@@ -237,7 +247,7 @@ def workshop_profile_media_deactivate(
 
 @router.get("/staff", response_model=list[WorkshopStaffSummary])
 def workshop_staff_list(
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[WorkshopStaffSummary]:
     return list_workshop_staff(admin_context=admin_context, db=db)
@@ -279,7 +289,7 @@ def workshop_staff_availability_update(
 
 @router.get("/requests/pending", response_model=list[WorkshopRequestSummary])
 def workshop_pending_requests(
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[WorkshopRequestSummary]:
     return list_pending_workshop_requests(admin_context=admin_context, db=db)
@@ -288,7 +298,7 @@ def workshop_pending_requests(
 @router.get("/requests/{request_id}", response_model=WorkshopRequestDetailResponse)
 def workshop_request_detail(
     request_id: int,
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> WorkshopRequestDetailResponse:
     return get_workshop_request_detail(
@@ -327,7 +337,7 @@ def workshop_services_history(
     operario_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[WorkshopServiceHistorySummary]:
     return list_workshop_service_history(
@@ -348,7 +358,7 @@ def workshop_services_history(
 )
 def workshop_service_history_detail(
     service_id: int,
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> WorkshopServiceHistoryDetailResponse:
     return get_workshop_service_history_detail(
@@ -363,7 +373,7 @@ def workshop_service_history_detail(
     response_model=list[WaitingAssignmentServiceSummary],
 )
 def workshop_services_waiting_assignment(
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[WaitingAssignmentServiceSummary]:
     return list_waiting_assignment_services(admin_context=admin_context, db=db)
@@ -375,7 +385,7 @@ def workshop_services_waiting_assignment(
 )
 def workshop_service_operario_candidates(
     service_id: int,
-    admin_context: WorkshopAdminContext = Depends(require_workshop_admin_context),
+    admin_context: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
     db: Session = Depends(get_db),
 ) -> list[OperarioCandidateSummary]:
     return get_operario_candidates_for_service(
@@ -462,3 +472,43 @@ def workshop_service_repair_report_save(
         ip_origen=request.client.host if request.client is not None else None,
         user_agent=request.headers.get("user-agent"),
     )
+
+
+@router.get(
+    "/tracking/active",
+    response_model=list[WorkshopActiveServiceTrackingSummary],
+)
+def workshop_tracking_active(
+    access: WorkshopAdminContext | WorkshopAccessContext = Depends(require_workshop_read_context),
+    db: Session = Depends(get_db),
+) -> list[WorkshopActiveServiceTrackingSummary]:
+    from app.packages.operaciones_taller.service import get_workshop_active_tracking
+    workshop_ids: tuple[int, ...]
+    if isinstance(access, WorkshopAdminContext):
+        workshop_ids = (access.workshop_id,)
+    else:
+        workshop_ids = access.taller_ids
+    return get_workshop_active_tracking(
+        workshop_ids=workshop_ids,
+        db=db,
+    )
+
+
+@router.get(
+    "/gerente/workshops",
+    response_model=list[WorkshopSummaryResponse],
+)
+def gerente_workshops_list(
+    gerente_context: WorkshopAccessContext = Depends(require_gerente_context),
+    db: Session = Depends(get_db),
+) -> list[WorkshopSummaryResponse]:
+    from app.models import Taller
+    from sqlalchemy import select
+
+    workshops = db.scalars(
+        select(Taller).where(Taller.id_taller.in_(gerente_context.taller_ids))
+    ).all()
+    return [
+        WorkshopSummaryResponse(id_taller=w.id_taller, nombre_comercial=w.nombre_comercial)
+        for w in workshops
+    ]

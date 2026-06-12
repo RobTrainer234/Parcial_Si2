@@ -427,13 +427,16 @@ class _OperatorServiceDetailPageState
                   ),
                 ),
                 const SizedBox(height: 16),
-                OperatorNavigationMap(
-                  incidentLatitud: incidentLatitud,
-                  incidentLongitud: incidentLongitud,
-                  operarioLatitud: operarioLatitud,
-                  operarioLongitud: operarioLongitud,
-                  lastLocationAt: lastLocationAt,
-                ),
+                  OperatorNavigationMap(
+                    incidentLatitud: incidentLatitud,
+                    incidentLongitud: incidentLongitud,
+                    operarioLatitud: operarioLatitud,
+                    operarioLongitud: operarioLongitud,
+                    lastLocationAt: lastLocationAt,
+                    routePoints: navigation?.routePoints,
+                    routeDistanceMeters: navigation?.routeDistanceMeters,
+                    routeDurationSeconds: navigation?.routeDurationSeconds,
+                  ),
                 const SizedBox(height: 16),
                 AppCard(
                   child: Column(

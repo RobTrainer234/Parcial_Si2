@@ -121,7 +121,15 @@ class NotificationsPage extends ConsumerWidget {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              if (item.resolvedServiceId != null)
+                              if (item.routeSuggested != null &&
+                                  item.routeSuggested!.isNotEmpty)
+                                OutlinedButton(
+                                  onPressed: () => context.push(
+                                    item.routeSuggested!,
+                                  ),
+                                  child: const Text('Abrir'),
+                                )
+                              else if (item.resolvedServiceId != null)
                                 OutlinedButton(
                                   onPressed: () => context.push(
                                     AppRoutes.serviceTrackingPath(
@@ -129,38 +137,6 @@ class NotificationsPage extends ConsumerWidget {
                                     ),
                                   ),
                                   child: const Text('Ver servicio'),
-                                ),
-                              if (item.resolvedServiceId != null &&
-                                  item.resolvedServiceState ==
-                                      'COMPLETADO_PENDIENTE_CONFIRMACION')
-                                OutlinedButton(
-                                  onPressed: () => context.push(
-                                    AppRoutes.serviceFinalizationPath(
-                                      item.resolvedServiceId!,
-                                    ),
-                                  ),
-                                  child: const Text('Validar resolución'),
-                                ),
-                              if (item.resolvedServiceId != null &&
-                                  item.resolvedServiceState ==
-                                      'FINALIZADO_PENDIENTE_PAGO')
-                                OutlinedButton(
-                                  onPressed: () => context.push(
-                                    AppRoutes.servicePaymentPath(
-                                      item.resolvedServiceId!,
-                                    ),
-                                  ),
-                                  child: const Text('Pagar'),
-                                ),
-                              if (item.resolvedServiceId != null &&
-                                  item.resolvedServiceState == 'PAGADO')
-                                OutlinedButton(
-                                  onPressed: () => context.push(
-                                    AppRoutes.serviceRatingPath(
-                                      item.resolvedServiceId!,
-                                    ),
-                                  ),
-                                  child: const Text('Calificar'),
                                 ),
                               if (item.resolvedServiceId == null &&
                                   item.requestId != null)

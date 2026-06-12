@@ -13,6 +13,10 @@ class NotificationItemModel {
   final DateTime? createdAt;
   final DateTime? sentAt;
   final DateTime? readAt;
+  final String? type;
+  final String? entityType;
+  final int? entityId;
+  final String? routeSuggested;
 
   const NotificationItemModel({
     required this.notificationId,
@@ -27,6 +31,10 @@ class NotificationItemModel {
     this.createdAt,
     this.sentAt,
     this.readAt,
+    this.type,
+    this.entityType,
+    this.entityId,
+    this.routeSuggested,
   });
 
   bool get isUnread => readAt == null;
@@ -66,6 +74,10 @@ class NotificationItemModel {
       createdAt: parseDate(json['created_at']),
       sentAt: parseDate(json['sent_at']),
       readAt: parseDate(json['read_at']),
+      type: json['type'] as String?,
+      entityType: json['entity_type'] as String?,
+      entityId: parseNullableInt(json['entity_id']),
+      routeSuggested: json['route_suggested'] as String?,
     );
   }
 }

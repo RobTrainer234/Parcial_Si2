@@ -39,6 +39,11 @@ class Persona(TimestampMixin, Base):
         back_populates="persona",
     )
     operario: Mapped[Operario | None] = relationship("Operario", back_populates="persona")
+    talleres_gerenciados: Mapped[list[GerenteTaller]] = relationship(
+        "GerenteTaller",
+        back_populates="persona",
+        cascade="all, delete-orphan",
+    )
     calificaciones_emitidas: Mapped[list[Calificacion]] = relationship(
         "Calificacion",
         back_populates="emisor",
@@ -108,6 +113,10 @@ class Taller(TimestampMixin, Base):
         "CatalogoServicioTaller",
         back_populates="taller",
     )
+    gerentes: Mapped[list[GerenteTaller]] = relationship(
+        "GerenteTaller",
+        back_populates="taller",
+    )
     solicitudes_servicio: Mapped[list[SolicitudServicio]] = relationship(
         "SolicitudServicio",
         back_populates="taller",
@@ -126,7 +135,9 @@ class Taller(TimestampMixin, Base):
 class Usuario(TimestampMixin, Base):
     __tablename__ = "usuario"
     __table_args__ = (
-        CheckConstraint("tipo_usuario IN ('CLIENTE','OPERARIO','ADMINISTRADOR','SUPER_ADMIN')"),
+        CheckConstraint(
+            "tipo_usuario IN ('CLIENTE','OPERARIO','ADMINISTRADOR','ADMIN_SUCURSAL','ADMIN_GERENTE_SUCURSALES','SUPER_ADMIN')"
+        ),
         CheckConstraint("intentos >= 0"),
         CheckConstraint(
             "reputacion_prom IS NULL OR (reputacion_prom >= 0 AND reputacion_prom <= 5)"
@@ -173,6 +184,10 @@ class Usuario(TimestampMixin, Base):
     )
     eventos_bitacora: Mapped[list[Bitacora]] = relationship(
         "Bitacora",
+        back_populates="usuario",
+    )
+    reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
+        "PasswordResetToken",
         back_populates="usuario",
     )
 
@@ -364,6 +379,24 @@ class OperarioEspecialidad(CreatedAtMixin, Base):
         "Especialidad",
         back_populates="operarios",
     )
+
+
+class GerenteTaller(CreatedAtMixin, Base):
+    __tablename__ = "gerente_taller"
+
+    id_persona: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("persona.id_persona", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    id_taller: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("taller.id_taller", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    persona: Mapped[Persona] = relationship("Persona", back_populates="talleres_gerenciados")
+    taller: Mapped[Taller] = relationship("Taller", back_populates="gerentes")
 
 
 Index("uq_usuario_email_lower", func.lower(Usuario.email), unique=True)

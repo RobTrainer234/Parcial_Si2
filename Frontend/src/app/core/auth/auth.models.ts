@@ -3,6 +3,7 @@ export interface ActorContext {
   administrador_persona_id: number | null;
   operario_id: number | null;
   taller_id: number | null;
+  taller_ids: number[] | null;
 }
 
 export interface UserProfile {

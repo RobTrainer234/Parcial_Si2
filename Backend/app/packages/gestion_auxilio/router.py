@@ -15,6 +15,7 @@ from .schemas import (
     DeviceRegistrationResponse,
     DeviceUnregisterRequest,
     DispatchPendingResponse,
+    MarkAllReadResponse,
     ClientActiveServiceSummaryResponse,
     FinalizationDecisionRequest,
     FinalizationDecisionResponse,
@@ -48,15 +49,16 @@ from .service import (
     get_client_service_prequotation,
     list_client_active_services,
     decide_service_finalization,
-    mark_notification_as_read,
-    register_notification_device,
-    unregister_notification_device,
     get_client_tracking_history,
     get_client_tracking_status,
     get_finalization_status,
     get_navigation_status,
     get_service_progress_history,
     get_service_progress_snapshot,
+    mark_all_notifications_as_read,
+    mark_notification_as_read,
+    register_notification_device,
+    unregister_notification_device,
     request_service_finalization,
     start_navigation,
     update_service_location,
@@ -399,6 +401,20 @@ def notifications_mark_read(
 ) -> NotificationReadResponse:
     return mark_notification_as_read(
         notification_id=notification_id,
+        current_user=current_user,
+        db=db,
+        ip_origen=request.client.host if request.client is not None else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@notifications_router.patch("/mark-all-read", response_model=MarkAllReadResponse)
+def notifications_mark_all_read(
+    request: Request,
+    current_user=Depends(get_current_profile_user),
+    db: Session = Depends(get_db),
+) -> MarkAllReadResponse:
+    return mark_all_notifications_as_read(
         current_user=current_user,
         db=db,
         ip_origen=request.client.host if request.client is not None else None,

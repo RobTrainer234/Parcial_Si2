@@ -219,3 +219,12 @@ class OperarioSpecialtyReplaceRequest(_NormalizedModel):
 class SimpleSuccessResponse(BaseModel):
     status: str
     message: str
+
+
+class ForgotPasswordRequest(_NormalizedModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(_NormalizedModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=128)
