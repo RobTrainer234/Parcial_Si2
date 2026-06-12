@@ -65,19 +65,24 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (!_formKey.currentState!.validate()) return;
 
     try {
+      debugPrint(
+        'LoginPage: attempting login for ${_emailController.text.trim()}',
+      );
       await ref
           .read(authControllerProvider.notifier)
           .login(_emailController.text.trim(), _passwordController.text);
 
       if (mounted) {
         final role = ref.read(authControllerProvider).valueOrNull?.role;
+        debugPrint('LoginPage: login success role=$role');
         context.go(AppRoutes.homeForRole(role));
       }
     } catch (e) {
+      debugPrint('LoginPage: login failed error=$e');
       if (e is ApiException) {
         String message = e.message;
         if (e.statusCode == 401) {
-          message = 'Correo o contraseña incorrectos.';
+          message = 'Correo o contrasena incorrectos.';
         } else if (e.statusCode == 422) {
           message = 'Revisa los datos ingresados.';
         } else if (e.statusCode == 423) {
@@ -93,18 +98,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           }
           if (retryAfter != null) {
             message =
-                'Cuenta bloqueada temporalmente. Inténtalo nuevamente en $retryAfter segundos.';
+                'Cuenta bloqueada temporalmente. Intentalo nuevamente en $retryAfter segundos.';
           } else {
-            message = 'Cuenta bloqueada temporalmente. Inténtalo más tarde.';
+            message = 'Cuenta bloqueada temporalmente. Intentalo mas tarde.';
           }
         } else if (e.statusCode != null && e.statusCode! >= 500) {
-          message = 'No se pudo iniciar sesión por un problema del servidor.';
+          message = 'No se pudo iniciar sesion por un problema del servidor.';
         } else if (e.statusCode == null) {
-          message = 'No se pudo conectar con el servidor. Revisa tu conexión.';
+          message = 'No se pudo conectar con el servidor. Revisa tu conexion.';
         }
         _showError(message);
       } else {
-        _showError('No se pudo conectar con el servidor. Revisa tu conexión.');
+        _showError('No se pudo conectar con el servidor. Revisa tu conexion.');
       }
     }
   }
@@ -158,7 +163,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   TextFormField(
                     controller: _emailController,
                     decoration: const InputDecoration(
-                      labelText: 'Correo electrónico',
+                      labelText: 'Correo electronico',
                       prefixIcon: Icon(Icons.email_outlined),
                     ),
                     keyboardType: TextInputType.emailAddress,
@@ -168,7 +173,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         return 'El correo es requerido';
                       }
                       if (!value.contains('@')) {
-                        return 'Ingresa un correo válido';
+                        return 'Ingresa un correo valido';
                       }
                       return null;
                     },
@@ -177,7 +182,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   TextFormField(
                     controller: _passwordController,
                     decoration: InputDecoration(
-                      labelText: 'Contraseña',
+                      labelText: 'Contrasena',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
                         onPressed: () {
@@ -196,7 +201,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     enabled: !isLoading,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'La contraseña es requerida';
+                        return 'La contrasena es requerida';
                       }
                       if (value.length < 8) {
                         return 'Debe tener al menos 8 caracteres';
@@ -206,9 +211,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   ),
                   const SizedBox(height: 24),
                   AppPrimaryButton(
-                    label: 'Iniciar sesión',
+                    label: 'Iniciar sesion',
                     isLoading: isLoading,
                     onPressed: isLoading ? null : _submit,
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: isLoading
+                          ? null
+                          : () => context.push(AppRoutes.forgotPassword),
+                      child: const Text('Olvide mi contrasena'),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Center(
@@ -217,7 +231,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           ? null
                           : () => context.push(AppRoutes.registerClient),
                       child: Text(
-                        '¿No tienes cuenta? Crear cuenta',
+                        'No tienes cuenta? Crear cuenta',
                         style: TextStyle(color: theme.colorScheme.primary),
                       ),
                     ),

@@ -23,6 +23,11 @@ class ActiveServicesPage extends ConsumerWidget {
       label: 'SERVICIOS',
       title: 'Servicios activos',
       subtitle: 'Consulta el estado de tus asistencias en curso.',
+      leading: IconButton(
+        tooltip: 'Volver',
+        onPressed: () => context.pop(),
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
       actions: IconButton(
         tooltip: 'Actualizar',
         onPressed: () => ref.read(activeServicesProvider.notifier).refresh(),

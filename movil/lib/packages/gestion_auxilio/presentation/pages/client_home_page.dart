@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,14 +24,30 @@ class ClientHomePage extends ConsumerStatefulWidget {
 }
 
 class _ClientHomePageState extends ConsumerState<ClientHomePage> {
+  Timer? _unreadTimer;
+
   @override
   void initState() {
     super.initState();
+    _unreadTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) {
+        if (mounted) {
+          ref.invalidate(unreadNotificationsCountProvider);
+        }
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref
           .read(offlineIncidentQueueControllerProvider.notifier)
           .syncPending(silent: true);
     });
+  }
+
+  @override
+  void dispose() {
+    _unreadTimer?.cancel();
+    super.dispose();
   }
 
   void _showMessage(BuildContext context, String message) {

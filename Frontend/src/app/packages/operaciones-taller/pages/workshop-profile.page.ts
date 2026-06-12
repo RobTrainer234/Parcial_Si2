@@ -4,12 +4,14 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  afterNextRender,
   computed,
   inject,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import * as L from 'leaflet';
 
 import { AppCardComponent } from '../../../shared/components/app-card.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state.component';
@@ -24,6 +26,13 @@ import {
   WorkshopProfileResponse,
   WorkshopProfileUpdateRequest,
 } from '../data-access/workshop-profile.models';
+
+interface LocationSearchResult {
+  lat: string;
+  lon: string;
+  display_name: string;
+  address?: Record<string, string>;
+}
 
 @Component({
   selector: 'app-workshop-profile-page',
@@ -100,12 +109,8 @@ import {
               </div>
               <div class="summary-grid">
                 <div class="summary-item">
-                  <span class="text-muted">Latitud</span>
-                  <strong>{{ formatNumber(data.latitud) }}</strong>
-                </div>
-                <div class="summary-item">
-                  <span class="text-muted">Longitud</span>
-                  <strong>{{ formatNumber(data.longitud) }}</strong>
+                  <span class="text-muted">Dirección</span>
+                  <strong>{{ formattedAddress(data) }}</strong>
                 </div>
                 <div class="summary-item">
                   <span class="text-muted">Radio de acción</span>
@@ -154,6 +159,7 @@ import {
                       ></textarea>
                     </label>
 
+                    <div class="legacy-location-fields">
                     <label class="app-field">
                       <span class="app-field__label">Latitud</span>
                       <input
@@ -185,6 +191,115 @@ import {
                         <span class="field-error">La longitud debe estar entre -180 y 180.</span>
                       }
                     </label>
+
+                    <label class="app-field app-field--full">
+                      <span class="app-field__label">Dirección</span>
+                      <input
+                        type="text"
+                        class="app-input"
+                        formControlName="direccion"
+                        placeholder="Calle/Avenida, número"
+                      />
+                    </label>
+
+                    <label class="app-field">
+                      <span class="app-field__label">Ciudad</span>
+                      <input
+                        type="text"
+                        class="app-input"
+                        formControlName="ciudad"
+                        placeholder="Santa Cruz"
+                      />
+                    </label>
+
+                    <label class="app-field">
+                      <span class="app-field__label">Zona</span>
+                      <input
+                        type="text"
+                        class="app-input"
+                        formControlName="zona"
+                        placeholder="Equipetrol, Centro, etc."
+                      />
+                    </label>
+
+                    <label class="app-field app-field--full">
+                      <span class="app-field__label">Referencia</span>
+                      <textarea
+                        class="app-textarea"
+                        formControlName="referencia"
+                        rows="2"
+                        placeholder="Cerca del mercado, a dos cuadras de..."
+                      ></textarea>
+                    </label>
+
+                    </div>
+
+                    <div class="map-picker">
+                      <div class="location-heading">
+                        <span class="location-heading__eyebrow">Ubicacion del taller</span>
+                        <h4>Busca el lugar y selecciona el resultado correcto</h4>
+                        <p>La direccion, ciudad, zona y coordenadas se completaran automaticamente.</p>
+                      </div>
+                      <div class="map-picker__search">
+                        <input
+                          type="text"
+                          class="app-input"
+                          [value]="searchQuery()"
+                          (input)="searchQuery.set(asInputValue($event))"
+                          (keydown.enter)="searchLocation(); $event.preventDefault()"
+                          placeholder="Buscar dirección en el mapa..."
+                        />
+                        <button
+                          type="button"
+                          class="app-button"
+                          (click)="searchLocation()"
+                          [disabled]="searchingLocation()"
+                        >
+                          {{ searchingLocation() ? 'Buscando...' : 'Buscar ubicacion' }}
+                        </button>
+                      </div>
+
+                      @if (locationSearchError()) {
+                        <p class="feedback feedback--error">{{ locationSearchError() }}</p>
+                      }
+
+                      @if (showSearchResults() && searchResults().length) {
+                        <ul class="map-picker__results">
+                          @for (result of searchResults(); track result.lat + result.lon) {
+                            <li>
+                              <button
+                                type="button"
+                                class="map-picker__result"
+                                (click)="selectSearchResult(result)"
+                              >
+                                {{ result.display_name }}
+                              </button>
+                            </li>
+                          }
+                        </ul>
+                      }
+
+                      <div id="workshop-map" class="map-picker__map"></div>
+                      <div class="selected-location">
+                        <div>
+                          <span class="selected-location__label">Ubicacion seleccionada</span>
+                          <strong>{{ selectedAddress() }}</strong>
+                          <small>{{ selectedLocationDetails() }}</small>
+                        </div>
+                        <button
+                          type="button"
+                          class="app-button app-button--secondary"
+                          (click)="openInGoogleMaps()"
+                          [disabled]="!hasSelectedCoordinates()"
+                        >
+                          Ver en Google Maps
+                        </button>
+                      </div>
+                      <p class="text-muted map-picker__hint">
+                        Haz clic en el mapa o busca una dirección para ubicar el taller.
+                        Arrastra el marcador para ajustar la posición.
+                      </p>
+                    </div>
 
                     <label class="app-field">
                       <span class="app-field__label">Radio de acción (km)</span>
@@ -270,7 +385,7 @@ import {
                 <strong>{{ formatNumber(data.radio_accion_km) }} km</strong>
               </div>
               <div class="summary-item">
-                <span class="text-muted">Ubicación</span>
+                <span class="text-muted">Coordenadas</span>
                 <strong>{{ formatNumber(data.latitud) }}, {{ formatNumber(data.longitud) }}</strong>
               </div>
               <div class="summary-item">
@@ -812,6 +927,127 @@ import {
         text-decoration: underline;
       }
 
+      .map-picker {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+
+      .legacy-location-fields {
+        display: contents;
+      }
+
+      .legacy-location-fields > .app-field:not(:last-child) {
+        display: none;
+      }
+
+      .location-heading {
+        padding: var(--space-4);
+        border: 1px solid color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+        border-radius: var(--radius-lg);
+        background: linear-gradient(
+          135deg,
+          color-mix(in srgb, var(--color-primary) 13%, var(--color-surface)),
+          var(--color-surface-soft)
+        );
+      }
+
+      .location-heading__eyebrow {
+        color: var(--color-primary);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .location-heading h4 {
+        margin: var(--space-2) 0;
+        font-size: 1.15rem;
+      }
+
+      .location-heading p {
+        margin: 0;
+        color: var(--color-text-muted);
+      }
+
+      .map-picker__search {
+        display: flex;
+        gap: var(--space-3);
+      }
+
+      .map-picker__search .app-input {
+        flex: 1;
+      }
+
+      .map-picker__results {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--color-surface);
+      }
+
+      .map-picker__result {
+        display: block;
+        width: 100%;
+        padding: var(--space-3);
+        cursor: pointer;
+        border-bottom: 1px solid var(--color-border);
+        border-top: 0;
+        border-left: 0;
+        border-right: 0;
+        background: transparent;
+        color: var(--color-text);
+        text-align: left;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+
+      .map-picker__result:last-child {
+        border-bottom: none;
+      }
+
+      .map-picker__result:hover {
+        background: var(--color-surface-soft);
+      }
+
+      .map-picker__map {
+        height: 350px;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-border);
+        z-index: 0;
+      }
+
+      .map-picker__hint {
+        font-size: 0.85rem;
+      }
+
+      .selected-location {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        padding: var(--space-4);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+      }
+
+      .selected-location__label,
+      .selected-location small {
+        display: block;
+        color: var(--color-text-muted);
+      }
+
+      .selected-location strong {
+        display: block;
+        margin: var(--space-1) 0;
+      }
+
       @media (max-width: 980px) {
         .profile-layout {
           grid-template-columns: 1fr;
@@ -819,6 +1055,12 @@ import {
       }
 
       @media (max-width: 720px) {
+        .map-picker__search,
+        .selected-location {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
         .media-item {
           flex-direction: column;
         }
@@ -872,9 +1114,21 @@ export class WorkshopProfilePage {
       null as number | null,
       [Validators.required, Validators.min(-180), Validators.max(180)],
     ],
+    direccion: [''],
+    ciudad: [''],
+    zona: [''],
+    referencia: [''],
     radio_accion_km: [null as number | null, [Validators.required, Validators.min(0.000001)]],
     acepta_seguro_propio: [false],
   });
+
+  private map: L.Map | null = null;
+  private mapMarker: L.Marker | null = null;
+  protected searchQuery = signal('');
+  protected searchResults = signal<LocationSearchResult[]>([]);
+  protected showSearchResults = signal(false);
+  protected searchingLocation = signal(false);
+  protected locationSearchError = signal('');
 
   protected readonly canSaveProfile = computed(
     () => (this.profile()?.specialties.length ?? 0) > 0,
@@ -919,16 +1173,239 @@ export class WorkshopProfilePage {
     this.saveError.set('');
     this.saveSuccess.set('');
     this.isEditingProfile.set(true);
+    afterNextRender(() => {
+      this.initMap();
+    });
   }
 
   protected cancelEditing(): void {
+    this.destroyMap();
     const currentProfile = this.profile();
     if (currentProfile) {
       this.patchForm(currentProfile);
     }
     this.saveError.set('');
     this.saveSuccess.set('');
+    this.locationSearchError.set('');
+    this.searchResults.set([]);
+    this.showSearchResults.set(false);
     this.isEditingProfile.set(false);
+  }
+
+  protected formattedAddress(data: WorkshopProfileResponse): string {
+    const parts = [data.direccion, data.zona, data.ciudad].filter(Boolean);
+    return parts.length ? parts.join(', ') : 'Sin dirección registrada.';
+  }
+
+  private initMap(): void {
+    this.destroyMap();
+    const el = document.getElementById('workshop-map');
+    if (!el) return;
+
+    this.map = L.map(el, {
+      center: [-17.7833, -63.1821],
+      zoom: 13,
+      zoomControl: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(this.map);
+
+    this.map.on('click', (e: L.LeafletMouseEvent) => {
+      this.handleMapClick(e.latlng);
+    });
+
+    const lat = this.profileForm.get('latitud')?.value;
+    const lng = this.profileForm.get('longitud')?.value;
+    if (lat != null && lng != null) {
+      const latlng = L.latLng(lat, lng);
+      this.placeMarker(latlng);
+      this.map.setView(latlng, 15);
+    }
+    window.setTimeout(() => this.map?.invalidateSize(), 0);
+  }
+
+  private destroyMap(): void {
+    if (this.mapMarker) {
+      this.mapMarker.remove();
+      this.mapMarker = null;
+    }
+    if (this.map) {
+      this.map.remove();
+      this.map = null;
+    }
+  }
+
+  protected async searchLocation(): Promise<void> {
+    const q = this.searchQuery().trim();
+    if (!q || q.length < 3) {
+      this.locationSearchError.set('Escribe al menos tres caracteres para buscar.');
+      return;
+    }
+
+    this.searchingLocation.set(true);
+    this.locationSearchError.set('');
+    this.showSearchResults.set(false);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&q=${encodeURIComponent(q)}&limit=5&countrycodes=bo`,
+      );
+      if (!res.ok) {
+        throw new Error('Location search failed');
+      }
+      const data: unknown = await res.json();
+      if (Array.isArray(data)) {
+        this.searchResults.set(
+          data.map((item: Record<string, unknown>) => ({
+            lat: String(item['lat'] ?? ''),
+            lon: String(item['lon'] ?? ''),
+            display_name: String(item['display_name'] ?? ''),
+            address:
+              item['address'] && typeof item['address'] === 'object'
+                ? (item['address'] as Record<string, string>)
+                : undefined,
+          })),
+        );
+      } else {
+        this.searchResults.set([]);
+      }
+      this.showSearchResults.set(true);
+      if (!this.searchResults().length) {
+        this.locationSearchError.set(
+          'No encontramos esa ubicacion. Prueba agregando ciudad, avenida o barrio.',
+        );
+      }
+    } catch {
+      this.searchResults.set([]);
+      this.locationSearchError.set(
+        'No se pudo consultar el buscador de ubicaciones. Intenta nuevamente.',
+      );
+    } finally {
+      this.searchingLocation.set(false);
+    }
+  }
+
+  protected selectSearchResult(result: LocationSearchResult): void {
+    this.showSearchResults.set(false);
+    this.locationSearchError.set('');
+    this.searchQuery.set(result.display_name);
+    const latlng = L.latLng(parseFloat(result.lat), parseFloat(result.lon));
+    this.placeMarker(latlng);
+    this.map?.setView(latlng, 16);
+    this.profileForm.patchValue({
+      latitud: parseFloat(result.lat),
+      longitud: parseFloat(result.lon),
+      ...this.locationFieldsFromAddress(result.address, result.display_name),
+    });
+  }
+
+  private handleMapClick(latlng: L.LatLng): void {
+    this.placeMarker(latlng);
+    this.profileForm.patchValue({
+      latitud: latlng.lat,
+      longitud: latlng.lng,
+    });
+    this.reverseGeocode(latlng);
+  }
+
+  private placeMarker(latlng: L.LatLng): void {
+    if (this.mapMarker) {
+      this.mapMarker.setLatLng(latlng);
+    } else if (this.map) {
+      this.mapMarker = L.marker(latlng, {
+        draggable: true,
+        icon: L.divIcon({
+          className: 'workshop-map-marker',
+          html: '<span></span>',
+          iconSize: [30, 38],
+          iconAnchor: [15, 38],
+        }),
+      }).addTo(this.map);
+      this.mapMarker.on('dragend', () => {
+        const pos = this.mapMarker!.getLatLng();
+        this.profileForm.patchValue({
+          latitud: pos.lat,
+          longitud: pos.lng,
+        });
+        this.reverseGeocode(pos);
+      });
+    }
+  }
+
+  private async reverseGeocode(latlng: L.LatLng): Promise<void> {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}&addressdetails=1`,
+      );
+      const data: Record<string, unknown> = await res.json();
+      const address = (data['address'] as Record<string, unknown>) ?? {};
+      const displayName = String(data['display_name'] ?? '');
+      this.profileForm.patchValue(
+        this.locationFieldsFromAddress(
+          Object.fromEntries(Object.entries(address).map(([key, value]) => [key, String(value)])),
+          displayName,
+        ),
+      );
+      this.searchQuery.set(displayName);
+    } catch {
+      // reverse geocode failed silently
+    }
+  }
+
+  protected hasSelectedCoordinates(): boolean {
+    return Number.isFinite(Number(this.profileForm.get('latitud')?.value))
+      && Number.isFinite(Number(this.profileForm.get('longitud')?.value));
+  }
+
+  protected selectedAddress(): string {
+    const address = this.profileForm.get('direccion')?.value?.trim();
+    return address || 'Selecciona una ubicacion en el buscador o mapa';
+  }
+
+  protected selectedLocationDetails(): string {
+    const city = this.profileForm.get('ciudad')?.value?.trim();
+    const zone = this.profileForm.get('zona')?.value?.trim();
+    return [zone, city].filter(Boolean).join(', ') || 'Ciudad y zona pendientes de completar';
+  }
+
+  protected openInGoogleMaps(): void {
+    const latitude = Number(this.profileForm.get('latitud')?.value);
+    const longitude = Number(this.profileForm.get('longitud')?.value);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return;
+    }
+    window.open(
+      `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
+      '_blank',
+      'noopener,noreferrer',
+    );
+  }
+
+  private locationFieldsFromAddress(
+    address: Record<string, string> | undefined,
+    displayName: string,
+  ): { direccion: string; ciudad: string; zona: string } {
+    const details = address ?? {};
+    const road = details['road'] ?? details['pedestrian'] ?? details['place'] ?? '';
+    const houseNumber = details['house_number'] ?? '';
+    return {
+      direccion: [road, houseNumber].filter(Boolean).join(' ') || displayName.split(',')[0] || '',
+      ciudad:
+        details['city'] ??
+        details['town'] ??
+        details['village'] ??
+        details['municipality'] ??
+        details['county'] ??
+        '',
+      zona:
+        details['suburb'] ??
+        details['neighbourhood'] ??
+        details['quarter'] ??
+        details['city_district'] ??
+        '',
+    };
   }
 
   protected openUploadPanel(type: 'image' | 'certificate'): void {
@@ -1006,6 +1483,10 @@ export class WorkshopProfilePage {
       descripcion: this.normalizeOptionalText(rawValue.descripcion),
       latitud,
       longitud,
+      direccion: this.normalizeOptionalText(rawValue.direccion),
+      ciudad: this.normalizeOptionalText(rawValue.ciudad),
+      zona: this.normalizeOptionalText(rawValue.zona),
+      referencia: this.normalizeOptionalText(rawValue.referencia),
       radio_accion_km,
       specialty_ids,
       acepta_seguro_propio: Boolean(rawValue.acepta_seguro_propio),
@@ -1020,6 +1501,7 @@ export class WorkshopProfilePage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
+          this.destroyMap();
           this.profile.set(response);
           this.patchForm(response);
           this.setInitialMedia(response);
@@ -1232,10 +1714,17 @@ export class WorkshopProfilePage {
         descripcion: profile.descripcion ?? '',
         latitud: this.toNumber(profile.latitud),
         longitud: this.toNumber(profile.longitud),
+        direccion: profile.direccion ?? '',
+        ciudad: profile.ciudad ?? '',
+        zona: profile.zona ?? '',
+        referencia: profile.referencia ?? '',
         radio_accion_km: this.toNumber(profile.radio_accion_km),
         acepta_seguro_propio: profile.acepta_seguro_propio ?? false,
       },
       { emitEvent: false },
+    );
+    this.searchQuery.set(
+      [profile.direccion, profile.zona, profile.ciudad].filter(Boolean).join(', '),
     );
   }
 

@@ -6,12 +6,14 @@ class AppSectionHeader extends StatelessWidget {
     required this.label,
     required this.title,
     this.subtitle,
+    this.leading,
     this.action,
   });
 
   final String label;
   final String title;
   final String? subtitle;
+  final Widget? leading;
   final Widget? action;
 
   @override
@@ -21,6 +23,10 @@ class AppSectionHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (leading != null) ...[
+          leading!,
+          const SizedBox(width: 12),
+        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

@@ -29,7 +29,9 @@ class AppConfig {
   }) {
     final base = Uri.parse(apiBaseUrl);
     final scheme = base.scheme == 'https' ? 'wss' : 'ws';
-    final baseSegments = base.pathSegments.where((segment) => segment.isNotEmpty).toList();
+    final baseSegments = base.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList();
     if (baseSegments.isNotEmpty && baseSegments.last.toLowerCase() == 'api') {
       baseSegments.removeLast();
     }
@@ -42,5 +44,16 @@ class AppConfig {
       pathSegments: targetSegments,
       queryParameters: queryParameters,
     );
+  }
+
+  static String get realtimeWebSocketUrl {
+    final apiUri = Uri.parse(apiBaseUrl);
+    return apiUri
+        .replace(
+          scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
+          path:
+              '${apiUri.path.replaceAll(RegExp(r'/+$'), '').replaceAll(RegExp(r'/api$'), '')}/realtime/ws',
+        )
+        .toString();
   }
 }

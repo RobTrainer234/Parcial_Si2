@@ -5,6 +5,7 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../core/widgets/app_card.dart';
 import '../../../../core/widgets/app_page_scaffold.dart';
 import '../../../../core/widgets/app_primary_button.dart';
+import '../../../../core/widgets/location_label.dart';
 import '../../data/models/incident_report_response_model.dart';
 
 class IncidentReportSuccessPage extends StatelessWidget {
@@ -21,6 +22,11 @@ class IncidentReportSuccessPage extends StatelessWidget {
         label: 'AUXILIO VIAL',
         title: 'Reporte enviado',
         subtitle: 'No se encontraron datos del reporte.',
+        leading: IconButton(
+          tooltip: 'Volver',
+          onPressed: () => context.pop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -47,6 +53,17 @@ class IncidentReportSuccessPage extends StatelessWidget {
       label: 'AUXILIO VIAL',
       title: 'Reporte enviado',
       subtitle: 'Tu incidente fue registrado correctamente.',
+      leading: IconButton(
+        tooltip: 'Volver',
+        onPressed: () {
+          if (Navigator.of(context).canPop()) {
+            context.pop();
+          } else {
+            context.go(AppRoutes.clientHome);
+          }
+        },
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
       child: ListView(
         children: [
           AppCard(
@@ -83,8 +100,10 @@ class IncidentReportSuccessPage extends StatelessWidget {
                   ),
                 _InfoRow(
                   label: 'Ubicación',
-                  value:
-                      '${result!.latitud.toStringAsFixed(4)}, ${result!.longitud.toStringAsFixed(4)}',
+                  valueWidget: LocationLabel(
+                    latitud: result!.latitud,
+                    longitud: result!.longitud,
+                  ),
                 ),
                 if (result!.evidences.isNotEmpty)
                   _InfoRow(
@@ -151,11 +170,13 @@ class IncidentReportSuccessPage extends StatelessWidget {
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
     required this.label,
-    required this.value,
+    this.value,
+    this.valueWidget,
   });
 
   final String label;
-  final String value;
+  final String? value;
+  final Widget? valueWidget;
 
   @override
   Widget build(BuildContext context) {
@@ -173,8 +194,8 @@ class _InfoRow extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            value,
+          valueWidget ?? Text(
+            value ?? '',
             style: theme.textTheme.bodyMedium,
           ),
         ],

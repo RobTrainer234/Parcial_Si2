@@ -10,6 +10,7 @@ import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/app_page_scaffold.dart';
 import '../../../../core/widgets/app_primary_button.dart';
+import '../../../../core/widgets/location_label.dart';
 import '../../data/models/incident_classification_model.dart';
 import '../../data/models/incident_detail_model.dart';
 import '../controllers/incident_diagnosis_controller.dart';
@@ -66,15 +67,9 @@ class _IncidentDiagnosisPageState extends ConsumerState<IncidentDiagnosisPage> {
       title: 'Diagnostico del incidente',
       subtitle:
           'Revisamos la informacion reportada para orientar la asistencia.',
-      actions: IconButton(
+      leading: IconButton(
         tooltip: 'Volver',
-        onPressed: () {
-          if (Navigator.of(context).canPop()) {
-            context.pop();
-          } else {
-            context.go(AppRoutes.clientHome);
-          }
-        },
+        onPressed: () => context.pop(),
         icon: const Icon(Icons.arrow_back_rounded),
       ),
       child: state.when(
@@ -201,8 +196,10 @@ class _DiagnosisContent extends StatelessWidget {
               ),
               _InfoItem(
                 label: 'Ubicacion',
-                value:
-                    '${detail.latitud.toStringAsFixed(4)}, ${detail.longitud.toStringAsFixed(4)}',
+                valueWidget: LocationLabel(
+                  latitud: detail.latitud,
+                  longitud: detail.longitud,
+                ),
               ),
             ],
           ),
@@ -428,10 +425,11 @@ class _DiagnosisContent extends StatelessWidget {
 }
 
 class _InfoItem extends StatelessWidget {
-  const _InfoItem({required this.label, required this.value});
+  const _InfoItem({required this.label, this.value, this.valueWidget});
 
   final String label;
-  final String value;
+  final String? value;
+  final Widget? valueWidget;
 
   @override
   Widget build(BuildContext context) {
@@ -449,7 +447,7 @@ class _InfoItem extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(value, style: theme.textTheme.bodyLarge),
+          valueWidget ?? Text(value ?? '', style: theme.textTheme.bodyLarge),
         ],
       ),
     );

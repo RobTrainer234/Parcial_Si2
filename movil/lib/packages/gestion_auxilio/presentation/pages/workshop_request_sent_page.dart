@@ -23,11 +23,16 @@ class WorkshopRequestSentPage extends StatelessWidget {
     final theme = Theme.of(context);
 
     if (result == null) {
-      return AppPageScaffold(
-        label: 'SOLICITUD',
-        title: 'Solicitud enviada',
-        subtitle: 'No se encontraron datos de la solicitud.',
-        child: Center(
+    return AppPageScaffold(
+      label: 'SOLICITUD',
+      title: 'Solicitud enviada',
+      subtitle: 'No se encontraron datos de la solicitud.',
+      leading: IconButton(
+        tooltip: 'Volver',
+        onPressed: () => context.pop(),
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
+      child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -56,6 +61,11 @@ class WorkshopRequestSentPage extends StatelessWidget {
       label: 'SOLICITUD',
       title: 'Solicitud enviada',
       subtitle: 'El taller recibirá tu solicitud de auxilio.',
+      leading: IconButton(
+        tooltip: 'Volver',
+        onPressed: () => context.pop(),
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
       child: ListView(
         children: [
           AppCard(

@@ -268,7 +268,7 @@ class _ServicePaymentPageState extends ConsumerState<ServicePaymentPage> {
           ),
         ),
       );
-      context.go(AppRoutes.serviceRatingPath(widget.serviceId));
+      context.go(AppRoutes.serviceTrackingPath(widget.serviceId));
     } catch (error) {
       if (!mounted) {
         return;

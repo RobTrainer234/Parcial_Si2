@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/realtime/realtime_service.dart';
 import '../../../../core/realtime/service_realtime_socket.dart';
 import '../../data/models/service_prequotation_model.dart';
 import '../../data/models/tracking_history_point_model.dart';
@@ -21,7 +22,15 @@ final serviceTrackingProvider = StateNotifierProvider.family<
     AsyncValue<ServiceTrackingViewModel>,
     int>((ref, serviceId) {
   final repository = ref.watch(clientServicesRepositoryProvider);
-  return ServiceTrackingController(repository, serviceId);
+  final controller = ServiceTrackingController(repository, serviceId);
+  ref.listen(realtimeEventsProvider, (_, next) {
+    next.whenData((event) {
+      if (event.isNotification && event.serviceId == serviceId) {
+        controller.refreshSilently();
+      }
+    });
+  });
+  return controller;
 });
 
 final servicePrequotationProvider =
@@ -74,41 +83,48 @@ class ServiceTrackingController
     final nextStatus = previous.status.copyWith(
       serviceState: event.serviceState ?? previous.status.serviceState,
       incidentId: event.incidentId ?? previous.status.incidentId,
-      incidentLatitud: _asDouble(event.data['incident_latitud']) ??
+      incidentLatitud:
+          _asDouble(event.data['incident_latitud']) ??
           previous.status.incidentLatitud,
-      incidentLongitud: _asDouble(event.data['incident_longitud']) ??
+      incidentLongitud:
+          _asDouble(event.data['incident_longitud']) ??
           previous.status.incidentLongitud,
-      lastOperarioLatitud: _asDouble(event.data['operario_latitud']) ??
+      lastOperarioLatitud:
+          _asDouble(event.data['operario_latitud']) ??
           previous.status.lastOperarioLatitud,
-      lastOperarioLongitud: _asDouble(event.data['operario_longitud']) ??
+      lastOperarioLongitud:
+          _asDouble(event.data['operario_longitud']) ??
           previous.status.lastOperarioLongitud,
-      lastLocationAt: _asDate(event.data['last_location_at']) ??
+      lastLocationAt:
+          _asDate(event.data['last_location_at']) ??
           previous.status.lastLocationAt,
-      hasLiveLocation: event.data['has_live_location'] as bool? ??
+      hasLiveLocation:
+          event.data['has_live_location'] as bool? ??
           previous.status.hasLiveLocation,
-      locationStale: event.data['location_stale'] as bool? ??
-          previous.status.locationStale,
+      locationStale:
+          event.data['location_stale'] as bool? ?? previous.status.locationStale,
       currentDistanceMeters:
           _asDouble(event.data['current_distance_meters']) ??
-              previous.status.currentDistanceMeters,
-      etaSeconds: _asInt(event.data['eta_seconds']) ?? previous.status.etaSeconds,
+          previous.status.currentDistanceMeters,
+      etaSeconds:
+          _asInt(event.data['eta_seconds']) ?? previous.status.etaSeconds,
       etaText: event.data['eta_text'] as String? ?? previous.status.etaText,
       routeDistanceMeters:
           _asDouble(event.data['route_distance_meters']) ??
-              previous.status.routeDistanceMeters,
+          previous.status.routeDistanceMeters,
       routeDurationSeconds:
           _asDouble(event.data['route_duration_seconds']) ??
-              previous.status.routeDurationSeconds,
+          previous.status.routeDurationSeconds,
       routePoints: TrackingStatusModel.fromJson({
-        'service_id': previous.status.serviceId,
-        'incident_id': previous.status.incidentId,
-        'incident_latitud': previous.status.incidentLatitud,
-        'incident_longitud': previous.status.incidentLongitud,
-        'has_live_location': previous.status.hasLiveLocation,
-        'location_stale': previous.status.locationStale,
-        'tracking_message': previous.status.trackingMessage,
-        'route_points': event.data['route_points'],
-      }).routePoints ??
+            'service_id': previous.status.serviceId,
+            'incident_id': previous.status.incidentId,
+            'incident_latitud': previous.status.incidentLatitud,
+            'incident_longitud': previous.status.incidentLongitud,
+            'has_live_location': previous.status.hasLiveLocation,
+            'location_stale': previous.status.locationStale,
+            'tracking_message': previous.status.trackingMessage,
+            'route_points': event.data['route_points'],
+          }).routePoints ??
           previous.status.routePoints,
     );
 

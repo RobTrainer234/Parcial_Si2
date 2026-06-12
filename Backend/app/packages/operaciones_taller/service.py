@@ -92,6 +92,7 @@ from .schemas import (
     DashboardCountItem,
     DashboardKpiSourceMetadata,
     IncidentHeatmapPoint,
+    IncidentZoneSummary,
     DashboardStuckServiceItem,
     LowRatingServiceItem,
     MonthlyRevenueItem,
@@ -184,6 +185,10 @@ DASHBOARD_STUCK_THRESHOLDS_MINUTES: dict[str, int] = {
 DASHBOARD_TRACKING_STALE_MINUTES = 5
 DASHBOARD_TRACKING_SERVICE_STATES = {"ASIGNADO", "EN_CAMINO", "EN_SITIO", "EN_DIAGNOSTICO_FISICO"}
 DASHBOARD_ACTION_PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+DASHBOARD_SLA_RESPONSE_MINUTES = Decimal("15")
+DASHBOARD_SLA_OPERARIO_ASSIGNMENT_MINUTES = Decimal("30")
+DASHBOARD_SLA_ARRIVAL_MINUTES = Decimal("60")
+DASHBOARD_SLA_COMPLETION_MINUTES = Decimal("240")
 
 
 def _build_request_query():
@@ -398,6 +403,10 @@ def _build_workshop_profile_response(taller: Taller) -> WorkshopProfileResponse:
         descripcion=taller.descripcion,
         latitud=taller.latitud,
         longitud=taller.longitud,
+        direccion=taller.direccion,
+        ciudad=taller.ciudad,
+        zona=taller.zona,
+        referencia=taller.referencia,
         radio_accion_km=taller.radio_accion_km,
         activo=taller.activo,
         acepta_seguro_propio=taller.acepta_seguro_propio,
@@ -1949,6 +1958,82 @@ def _get_incident_heatmap_points(
     ]
 
 
+def _unique_incidents(requests: list[SolicitudServicio]) -> list[Incidente]:
+    incidents_by_id = {request.id_incidente: request.incidente for request in requests}
+    return list(incidents_by_id.values())
+
+
+def _incident_type(incident: Incidente) -> str:
+    specialty = incident.especialidad_detectada or incident.especialidad_reportada_cliente
+    searchable = " ".join(
+        value
+        for value in (
+            specialty.nombre if specialty is not None else None,
+            incident.descripcion_cliente,
+            incident.diagnostico_ia_resumen,
+        )
+        if value
+    ).upper()
+    if any(keyword in searchable for keyword in ("BATERIA", "BATERÍA", "ELECTRIC", "ARRANQUE")):
+        return "BATERIA"
+    if any(keyword in searchable for keyword in ("LLANTA", "NEUMATIC", "RUEDA")):
+        return "LLANTA"
+    if any(keyword in searchable for keyword in ("CHOQUE", "COLISION", "COLISIÓN", "ACCIDENT", "IMPACT")):
+        return "CHOQUE"
+    if any(keyword in searchable for keyword in ("MOTOR", "MECANIC", "ENCEND", "SOBRECALENT")):
+        return "MOTOR"
+    return "OTROS"
+
+
+def _get_incident_zones(incidents: list[Incidente]) -> list[IncidentZoneSummary]:
+    grouped: dict[tuple[Decimal, Decimal], list[Incidente]] = {}
+    for incident in incidents:
+        zone = (
+            Decimal(incident.latitud).quantize(Decimal("0.01")),
+            Decimal(incident.longitud).quantize(Decimal("0.01")),
+        )
+        grouped.setdefault(zone, []).append(incident)
+
+    zones: list[IncidentZoneSummary] = []
+    for (latitude, longitude), zone_incidents in grouped.items():
+        type_counts = _count_items_by_label([_incident_type(incident) for incident in zone_incidents])
+        zones.append(
+            IncidentZoneSummary(
+                zone_label=f"Zona {latitude}, {longitude}",
+                center_latitud=latitude,
+                center_longitud=longitude,
+                incident_count=len(zone_incidents),
+                dominant_incident_type=type_counts[0].label,
+            )
+        )
+    return sorted(zones, key=lambda zone: (-zone.incident_count, zone.zone_label))[:10]
+
+
+def _service_meets_sla(service: Servicio) -> bool | None:
+    report_to_response = _minutes_between(
+        service.solicitud.incidente.fecha_hora,
+        service.solicitud.fecha_respuesta,
+    )
+    response_to_assignment = _minutes_between(
+        service.solicitud.fecha_respuesta,
+        service.fecha_asignacion_operario,
+    )
+    assignment_to_arrival = _minutes_between(
+        service.fecha_asignacion_operario,
+        service.fecha_llegada,
+    )
+    start_to_finish = _minutes_between(service.fecha_inicio, service.fecha_fin)
+    stages = (
+        (report_to_response, DASHBOARD_SLA_RESPONSE_MINUTES),
+        (response_to_assignment, DASHBOARD_SLA_OPERARIO_ASSIGNMENT_MINUTES),
+        (assignment_to_arrival, DASHBOARD_SLA_ARRIVAL_MINUTES),
+        (start_to_finish, DASHBOARD_SLA_COMPLETION_MINUTES),
+    )
+    if any(duration is None for duration, _ in stages):
+        return None
+    return all(duration <= threshold for duration, threshold in stages if duration is not None)
+
+
 def _get_dashboard_kpis(
     *,
     requests_in_period: list[SolicitudServicio],
@@ -2020,6 +2105,37 @@ def _get_dashboard_kpis(
         )
         if minutes is not None
     ]
+    report_to_workshop_assignment_times = [
+        minutes
+        for minutes in (
+            _minutes_between(request.incidente.fecha_hora, request.fecha_respuesta)
+            for request in requests_in_period
+            if request.estado == "ACEPTADA"
+        )
+        if minutes is not None
+    ]
+    operario_assignment_times = [
+        minutes
+        for minutes in (
+            _minutes_between(service.solicitud.fecha_respuesta, service.fecha_asignacion_operario)
+            for service in services_in_period
+        )
+        if minutes is not None
+    ]
+    assignment_to_arrival_times = [
+        minutes
+        for minutes in (
+            _minutes_between(
+                service.fecha_asignacion_operario,
+                _get_arrival_start_end(
+                    service=service,
+                    service_bitacoras=service_bitacoras_by_service_id.get(service.id_servicio, []),
+                )[1],
+            )
+            for service in services_in_period
+        )
+        if minutes is not None
+    ]
     finalized_services = [
         service for service in services_in_period if service.estado in DASHBOARD_COMPLETED_SERVICE_STATES
     ]
@@ -2072,6 +2188,31 @@ def _get_dashboard_kpis(
             minutes_in_route = _minutes_between(arrival_start_at, now)
             if minutes_in_route is not None and minutes_in_route > arrival_threshold_minutes:
                 services_exceeding_arrival_threshold += 1
+    cancelled_incident_ids = {
+        request.id_incidente
+        for request in requests_in_period
+        if request.estado in {"CANCELADA", "DESCARTADA"}
+        or request.incidente.estado == "CANCELADO"
+        or (request.servicio is not None and request.servicio.estado == "CANCELADO")
+    }
+    serviced_incident_ids = {service.solicitud.id_incidente for service in services_in_period}
+    unattended_incident_ids = {
+        request.id_incidente
+        for request in requests_in_period
+        if request.estado in {"RECHAZADA", "EXPIRADA"}
+        and request.id_incidente not in serviced_incident_ids
+    }
+    sla_results = [
+        result
+        for result in (_service_meets_sla(service) for service in finalized_services)
+        if result is not None
+    ]
+    sla_met_services = sum(1 for result in sla_results if result)
+    sla_compliance_rate = _percentage(sla_met_services, len(sla_results))
+    completion_rate = _percentage(completed_services, accepted_requests)
+    efficiency_components = [
+        value for value in (sla_compliance_rate, completion_rate) if value is not None
+    ]
 
     return WorkshopDashboardKpiResponse(
         pending_requests=pending_requests,
@@ -2098,12 +2239,23 @@ def _get_dashboard_kpis(
         max_arrival_time_minutes=_max_decimal(arrival_times),
         arrived_services_count=arrived_services_count,
         average_acceptance_time_minutes=_average_decimal(assignment_times),
+        average_report_to_workshop_assignment_minutes=_average_decimal(
+            report_to_workshop_assignment_times
+        ),
+        average_operario_assignment_time_minutes=_average_decimal(operario_assignment_times),
+        average_assignment_to_arrival_minutes=_average_decimal(assignment_to_arrival_times),
         average_completion_time_minutes=_average_decimal(completion_times),
         completed_services_count=completed_services_count,
         services_without_operator=services_without_operator,
         services_without_location=services_without_location,
         stale_tracking_services=stale_tracking_services,
         services_exceeding_arrival_threshold=services_exceeding_arrival_threshold,
+        cancelled_cases=len(cancelled_incident_ids),
+        unattended_cases=len(unattended_incident_ids),
+        sla_compliance_rate=sla_compliance_rate,
+        sla_met_services=sla_met_services,
+        sla_evaluated_services=len(sla_results),
+        tenant_efficiency_score=_average_decimal(efficiency_components),
     )
 
 
@@ -2114,6 +2266,7 @@ def _get_operations_metrics(
     bitacoras_by_service_id: dict[int, list[Bitacora]],
     now: datetime,
 ) -> WorkshopDashboardOperationsResponse:
+    unique_incidents = _unique_incidents(requests_in_period)
     return WorkshopDashboardOperationsResponse(
         services_by_state=_count_items_by_label([service.estado for service in services_in_period]),
         requests_by_status=_count_items_by_label([request.estado for request in requests_in_period]),
@@ -2128,6 +2281,10 @@ def _get_operations_metrics(
                 for request in requests_in_period
             ]
         ),
+        incidents_by_type=_count_items_by_label(
+            [_incident_type(incident) for incident in unique_incidents]
+        ),
+        incident_zones=_get_incident_zones(unique_incidents),
         incident_heatmap_points=_get_incident_heatmap_points(
             requests_in_period=requests_in_period,
         ),
@@ -3332,6 +3489,10 @@ def update_workshop_profile(
         "descripcion": taller.descripcion,
         "latitud": str(taller.latitud),
         "longitud": str(taller.longitud),
+        "direccion": taller.direccion,
+        "ciudad": taller.ciudad,
+        "zona": taller.zona,
+        "referencia": taller.referencia,
         "radio_accion_km": str(taller.radio_accion_km),
         "acepta_seguro_propio": taller.acepta_seguro_propio,
         "specialty_ids": sorted(
@@ -3345,6 +3506,10 @@ def update_workshop_profile(
     taller.descripcion = _normalize_optional_text(payload.descripcion)
     taller.latitud = payload.latitud
     taller.longitud = payload.longitud
+    taller.direccion = _normalize_optional_text(payload.direccion) if payload.direccion else None
+    taller.ciudad = _normalize_optional_text(payload.ciudad) if payload.ciudad else None
+    taller.zona = _normalize_optional_text(payload.zona) if payload.zona else None
+    taller.referencia = _normalize_optional_text(payload.referencia) if payload.referencia else None
     taller.radio_accion_km = payload.radio_accion_km
     if payload.acepta_seguro_propio is not None:
         taller.acepta_seguro_propio = payload.acepta_seguro_propio
@@ -3385,6 +3550,10 @@ def update_workshop_profile(
                         ("descripcion", previous_payload["descripcion"], taller.descripcion),
                         ("latitud", previous_payload["latitud"], str(taller.latitud)),
                         ("longitud", previous_payload["longitud"], str(taller.longitud)),
+                        ("direccion", previous_payload["direccion"], taller.direccion),
+                        ("ciudad", previous_payload["ciudad"], taller.ciudad),
+                        ("zona", previous_payload["zona"], taller.zona),
+                        ("referencia", previous_payload["referencia"], taller.referencia),
                         ("radio_accion_km", previous_payload["radio_accion_km"], str(taller.radio_accion_km)),
                         (
                             "acepta_seguro_propio",
@@ -4078,6 +4247,9 @@ def save_repair_report(
         service.confirmacion_cliente = None
         service.fecha_confirmacion_cliente = None
         service.observaciones_cierre = None
+
+        if service.operario is not None and service.operario.estado_disponibilidad == "EN_SERVICIO":
+            service.operario.estado_disponibilidad = "DISPONIBLE"
 
         db.add(
             _create_bitacora_event(

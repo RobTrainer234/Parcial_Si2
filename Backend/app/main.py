@@ -12,6 +12,7 @@ from app.packages.operaciones_taller import router as operaciones_taller_router
 from app.packages.reputacion_auditoria import router as reputacion_auditoria_router
 from app.packages.seguridad_usuarios import router as seguridad_usuarios_router
 from app.routers import health_router
+from app.realtime import router as realtime_router
 
 
 def create_app() -> FastAPI:
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(finanzas_seguros_router)
     app.include_router(operaciones_taller_router)
     app.include_router(reputacion_auditoria_router)
+    app.include_router(realtime_router)
     return app
 
 

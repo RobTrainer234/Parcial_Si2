@@ -23,8 +23,10 @@ import '../../packages/operaciones_taller/presentation/pages/operator_service_de
 import '../../packages/reputacion_auditoria/presentation/pages/service_rating_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/admin_mobile_info_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/client_register_page.dart';
+import '../../packages/seguridad_usuarios/presentation/pages/forgot_password_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/login_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/profile_page.dart';
+import '../../packages/seguridad_usuarios/presentation/pages/reset_password_page.dart';
 import '../../packages/seguridad_usuarios/presentation/pages/splash_page.dart';
 import '../auth/auth_controller.dart';
 import 'app_routes.dart';
@@ -97,6 +99,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   bool isPublicOnlyRoute(String location) {
     return location == AppRoutes.login ||
+        location == AppRoutes.forgotPassword ||
+        location == AppRoutes.resetPassword ||
         location == AppRoutes.registerClient ||
         location == AppRoutes.registerClientVerify ||
         location == AppRoutes.splash;
@@ -118,6 +122,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return LoginPage(
             initialEmail: extra?['initial_email'] as String?,
             successMessage: extra?['success_message'] as String?,
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.forgotPassword,
+        builder: (context, state) => const ForgotPasswordPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.resetPassword,
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return ResetPasswordPage(
+            initialToken: extra?['initial_token'] as String?,
           );
         },
       ),
@@ -328,6 +345,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final location = state.matchedLocation;
       final isLoading = authState.isLoading;
       final isAuthenticated = authState.valueOrNull?.isAuthenticated == true;
+
+      debugPrint(
+        'AppRouter.redirect: location=$location loading=$isLoading authenticated=$isAuthenticated role=$role',
+      );
 
       if (isLoading) {
         return location == AppRoutes.splash ? null : AppRoutes.splash;
