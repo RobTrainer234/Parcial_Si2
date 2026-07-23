@@ -19,6 +19,22 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'forgot-password',
+    canActivate: [adminGuestGuard],
+    loadComponent: () =>
+      import('./packages/seguridad-usuarios/pages/forgot-password.page').then(
+        (m) => m.ForgotPasswordPage,
+      ),
+  },
+  {
+    path: 'reset-password',
+    canActivate: [adminGuestGuard],
+    loadComponent: () =>
+      import('./packages/seguridad-usuarios/pages/reset-password.page').then(
+        (m) => m.ResetPasswordPage,
+      ),
+  },
+  {
     path: 'admin',
     canActivate: [authGuard, adminGuard],
     loadComponent: () =>
@@ -53,6 +69,34 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'workshop/profile',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/workshop-profile.page').then(
+            (m) => m.WorkshopProfilePage,
+          ),
+      },
+      {
+        path: 'workshop/catalog',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/workshop-catalog.page').then(
+            (m) => m.WorkshopCatalogPage,
+          ),
+      },
+      {
+        path: 'workshop/staff',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/workshop-staff.page').then(
+            (m) => m.WorkshopStaffPage,
+          ),
+      },
+      {
+        path: 'workshop/spare-parts',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/taller-spare-parts.page').then(
+            (m) => m.TallerSparePartsPage,
+          ),
+      },
+      {
         path: 'requests',
         loadComponent: () =>
           import('./packages/operaciones-taller/pages/pending-requests.page').then(
@@ -78,6 +122,20 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./packages/operaciones-taller/pages/service-history.page').then(
             (m) => m.ServiceHistoryPage,
+          ),
+      },
+      {
+        path: 'services/tracking',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/service-tracking.page').then(
+            (m) => m.ServiceTrackingPage,
+          ),
+      },
+      {
+        path: 'maintenance-appointments',
+        loadComponent: () =>
+          import('./packages/operaciones-taller/pages/maintenance-appointments.page').then(
+            (m) => m.MaintenanceAppointmentsPage,
           ),
       },
       {

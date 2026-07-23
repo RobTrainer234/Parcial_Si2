@@ -10,6 +10,80 @@ class _NormalizedModel(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
 
+class ClientServiceHistorySummaryResponse(BaseModel):
+    service_id: int
+    service_state: str
+    incident_id: int
+    vehicle_id: int
+    vehicle_label: str
+    workshop_name: str
+    operario_name: str | None = None
+    detected_specialty: str | None = None
+    ai_summary: str | None = None
+    prequotation_min: Decimal | None = None
+    prequotation_max: Decimal | None = None
+    final_amount: Decimal | None = None
+    payment_status: str | None = None
+    rating: int | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+    paid_at: datetime | None = None
+
+
+class ClientServiceHistoryDetailResponse(ClientServiceHistorySummaryResponse):
+    incident_description: str | None = None
+    payment_method: str | None = None
+    payment_receipt: str | None = None
+    work_performed: str | None = None
+    physical_diagnosis: str | None = None
+    observations: str | None = None
+    recommendations: str | None = None
+
+
+class MaintenanceAppointmentCreateRequest(_NormalizedModel):
+    vehicle_id: int = Field(gt=0)
+    workshop_id: int = Field(gt=0)
+    catalog_service_id: int | None = Field(default=None, gt=0)
+    scheduled_at: datetime
+    reason: str | None = Field(default=None, max_length=255)
+    client_notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaintenanceAppointmentUpdateRequest(_NormalizedModel):
+    vehicle_id: int | None = Field(default=None, gt=0)
+    catalog_service_id: int | None = Field(default=None, gt=0)
+    scheduled_at: datetime | None = None
+    reason: str | None = Field(default=None, max_length=255)
+    client_notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaintenanceAppointmentWorkshopActionRequest(_NormalizedModel):
+    workshop_notes: str | None = Field(default=None, max_length=2000)
+
+
+class MaintenanceAppointmentResponse(BaseModel):
+    appointment_id: int
+    status: str
+    scheduled_at: datetime
+    reason: str | None = None
+    client_notes: str | None = None
+    workshop_notes: str | None = None
+    created_at: datetime
+    vehicle_id: int
+    vehicle_label: str
+    workshop_id: int
+    workshop_name: str
+    catalog_service_id: int | None = None
+    catalog_service_name: str | None = None
+    customer_name: str | None = None
+
+
+class MaintenanceWorkshopOptionResponse(BaseModel):
+    workshop_id: int
+    workshop_name: str
+    city: str | None = None
+
+
 class RouteStepSummary(BaseModel):
     distance_meters: Decimal
     duration_seconds: Decimal

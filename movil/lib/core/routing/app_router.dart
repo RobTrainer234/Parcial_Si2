@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../packages/gestion_auxilio/data/models/hire_workshop_response_model.dart';
 import '../../packages/gestion_auxilio/presentation/pages/active_services_page.dart';
 import '../../packages/gestion_auxilio/presentation/pages/client_home_page.dart';
+import '../../packages/gestion_auxilio/presentation/pages/client_service_history_page.dart';
+import '../../packages/gestion_auxilio/presentation/pages/maintenance_appointments_page.dart';
 import '../../packages/gestion_auxilio/presentation/pages/notifications_page.dart';
 import '../../packages/gestion_auxilio/presentation/pages/service_finalization_page.dart';
 import '../../packages/gestion_auxilio/presentation/pages/service_prequotation_page.dart';
@@ -169,6 +171,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.activeServices,
         builder: (context, state) => const ActiveServicesPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.serviceHistory,
+        builder: (context, state) => const ClientServiceHistoryPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.maintenanceAppointments,
+        builder: (context, state) => const MaintenanceAppointmentsPage(),
       ),
       GoRoute(
         path: AppRoutes.reportIncident,

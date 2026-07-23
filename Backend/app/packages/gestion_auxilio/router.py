@@ -9,6 +9,7 @@ from app.packages.seguridad_usuarios.dependencies import (
     require_cliente_user,
     require_operario_user,
 )
+from app.packages.operaciones_taller.dependencies import require_workshop_admin_context
 
 from .schemas import (
     DeviceRegistrationRequest,
@@ -17,6 +18,8 @@ from .schemas import (
     DispatchPendingResponse,
     MarkAllReadResponse,
     ClientActiveServiceSummaryResponse,
+    ClientServiceHistoryDetailResponse,
+    ClientServiceHistorySummaryResponse,
     FinalizationDecisionRequest,
     FinalizationDecisionResponse,
     FinalizationRequestResponse,
@@ -39,6 +42,11 @@ from .schemas import (
     UnreadCountResponse,
     ServiceLocationUpdateRequest,
     ServiceLocationUpdateResponse,
+    MaintenanceAppointmentCreateRequest,
+    MaintenanceAppointmentResponse,
+    MaintenanceAppointmentUpdateRequest,
+    MaintenanceAppointmentWorkshopActionRequest,
+    MaintenanceWorkshopOptionResponse,
 )
 from .service import (
     dispatch_pending_notifications,
@@ -47,7 +55,16 @@ from .service import (
     hire_incident_workshop,
     get_incident_recommendations,
     get_client_service_prequotation,
+    get_client_service_history_detail,
     list_client_active_services,
+    list_client_maintenance_appointments,
+    list_maintenance_workshops,
+    list_client_service_history,
+    create_maintenance_appointment,
+    update_client_maintenance_appointment,
+    cancel_client_maintenance_appointment,
+    list_workshop_maintenance_appointments,
+    change_workshop_maintenance_appointment_status,
     decide_service_finalization,
     get_client_tracking_history,
     get_client_tracking_status,
@@ -71,6 +88,7 @@ client_router = APIRouter(prefix="/client", tags=["client-services"])
 tracking_router = APIRouter(prefix="/tracking", tags=["client-tracking"])
 notifications_router = APIRouter(prefix="/notifications", tags=["notifications"])
 assistance_router = APIRouter(prefix="/assistance", tags=["client-assistance"])
+maintenance_workshop_router = APIRouter(prefix="/workshop", tags=["maintenance-appointments"])
 
 
 @field_router.post(
@@ -249,6 +267,112 @@ def client_active_services(
     db: Session = Depends(get_db),
 ) -> list[ClientActiveServiceSummaryResponse]:
     return list_client_active_services(
+        current_user=current_user,
+        db=db,
+    )
+
+
+@client_router.get(
+    "/services/history",
+    response_model=list[ClientServiceHistorySummaryResponse],
+)
+def client_service_history(
+    state: str | None = None,
+    vehicle_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> list[ClientServiceHistorySummaryResponse]:
+    return list_client_service_history(
+        current_user=current_user,
+        db=db,
+        state_filter=state,
+        vehicle_id=vehicle_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@client_router.get(
+    "/services/{service_id}/history-detail",
+    response_model=ClientServiceHistoryDetailResponse,
+)
+def client_service_history_detail(
+    service_id: int,
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> ClientServiceHistoryDetailResponse:
+    return get_client_service_history_detail(
+        service_id=service_id,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@client_router.get(
+    "/maintenance-appointments",
+    response_model=list[MaintenanceAppointmentResponse],
+)
+def client_maintenance_appointments(
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> list[MaintenanceAppointmentResponse]:
+    return list_client_maintenance_appointments(current_user=current_user, db=db)
+
+
+@client_router.get(
+    "/maintenance-workshops",
+    response_model=list[MaintenanceWorkshopOptionResponse],
+)
+def client_maintenance_workshops(
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> list[MaintenanceWorkshopOptionResponse]:
+    return list_maintenance_workshops(db=db)
+
+
+@client_router.post(
+    "/maintenance-appointments",
+    response_model=MaintenanceAppointmentResponse,
+)
+def client_create_maintenance_appointment(
+    payload: MaintenanceAppointmentCreateRequest,
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceAppointmentResponse:
+    return create_maintenance_appointment(payload=payload, current_user=current_user, db=db)
+
+
+@client_router.patch(
+    "/maintenance-appointments/{appointment_id}",
+    response_model=MaintenanceAppointmentResponse,
+)
+def client_update_maintenance_appointment(
+    appointment_id: int,
+    payload: MaintenanceAppointmentUpdateRequest,
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceAppointmentResponse:
+    return update_client_maintenance_appointment(
+        appointment_id=appointment_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@client_router.patch(
+    "/maintenance-appointments/{appointment_id}/cancel",
+    response_model=MaintenanceAppointmentResponse,
+)
+def client_cancel_maintenance_appointment(
+    appointment_id: int,
+    current_user=Depends(require_cliente_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceAppointmentResponse:
+    return cancel_client_maintenance_appointment(
+        appointment_id=appointment_id,
         current_user=current_user,
         db=db,
     )
@@ -447,8 +571,48 @@ def notifications_dispatch_pending(
     )
 
 
+@maintenance_workshop_router.get(
+    "/maintenance-appointments",
+    response_model=list[MaintenanceAppointmentResponse],
+)
+def workshop_maintenance_appointments(
+    admin_context=Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> list[MaintenanceAppointmentResponse]:
+    return list_workshop_maintenance_appointments(
+        workshop_id=admin_context.workshop_id,
+        db=db,
+    )
+
+
+@maintenance_workshop_router.patch(
+    "/maintenance-appointments/{appointment_id}/{action}",
+    response_model=MaintenanceAppointmentResponse,
+)
+def workshop_maintenance_appointment_action(
+    appointment_id: int,
+    action: str,
+    payload: MaintenanceAppointmentWorkshopActionRequest,
+    admin_context=Depends(require_workshop_admin_context),
+    db: Session = Depends(get_db),
+) -> MaintenanceAppointmentResponse:
+    statuses = {"confirm": "CONFIRMADA", "reject": "RECHAZADA", "complete": "COMPLETADA"}
+    if action not in statuses:
+        from fastapi import HTTPException, status
+
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported appointment action.")
+    return change_workshop_maintenance_appointment_status(
+        appointment_id=appointment_id,
+        workshop_id=admin_context.workshop_id,
+        new_status=statuses[action],
+        payload=payload,
+        db=db,
+    )
+
+
 router.include_router(field_router)
 router.include_router(client_router)
 router.include_router(tracking_router)
 router.include_router(assistance_router)
 router.include_router(notifications_router)
+router.include_router(maintenance_workshop_router)

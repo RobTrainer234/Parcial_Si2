@@ -1,5 +1,6 @@
 from .base import Base, CreatedAtMixin, TimestampMixin
 from .bitacora import Bitacora
+from .cita_mantenimiento import CitaMantenimiento
 from .incidente import CatalogoServicioTaller, Incidente, SolicitudServicio
 from .notificacion import DispositivoUsuario, Notificacion
 from .pago import MetodoPago, Pago
@@ -39,6 +40,7 @@ __all__ = [
     "CatalogoServicioTaller",
     "CategoriaProducto",
     "Cliente",
+    "CitaMantenimiento",
     "CoberturaEspecialidad",
     "Color",
     "CreatedAtMixin",

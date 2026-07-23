@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 
 import { AuthService } from '../../../core/auth/auth.service';
 import { ThemeService } from '../../../core/theme/theme.service';
@@ -11,7 +11,7 @@ import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
 @Component({
   selector: 'app-admin-login-page',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink],
   template: `
     <div class="login-page">
       <button
@@ -64,6 +64,10 @@ import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
           <button class="app-button login-card__submit" type="submit" [disabled]="form.invalid || submitting()">
             {{ submitting() ? 'Validando acceso...' : 'Ingresar al panel' }}
           </button>
+
+          <a routerLink="/forgot-password" class="login-card__forgot-link">
+            ¿Olvidaste tu contraseña?
+          </a>
         </form>
       </section>
     </div>
@@ -179,6 +183,19 @@ import { localizeBackendMessage } from '../../../shared/utils/user-facing-text';
       .login-card__submit {
         width: 100%;
         margin-top: var(--space-2);
+      }
+
+      .login-card__forgot-link {
+        display: block;
+        text-align: center;
+        color: var(--color-primary);
+        font-size: 0.9rem;
+        text-decoration: none;
+        margin-top: var(--space-2);
+      }
+
+      .login-card__forgot-link:hover {
+        text-decoration: underline;
       }
 
       @media (max-width: 900px) {

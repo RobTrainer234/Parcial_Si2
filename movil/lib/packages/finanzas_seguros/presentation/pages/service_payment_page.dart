@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -63,6 +65,7 @@ class _ServicePaymentPageState extends ConsumerState<ServicePaymentPage> {
           final latestPayment =
               data.latestStatus?.payment ?? summary.existingPayment;
           final cashMethod = _findCashMethod(summary.paymentMethods);
+          final digitalMethods = _findDigitalMethods(summary.paymentMethods);
           final isPaid = _isPaid(data);
           final canPayCash =
               summary.serviceState == 'FINALIZADO_PENDIENTE_PAGO' &&
@@ -153,9 +156,30 @@ class _ServicePaymentPageState extends ConsumerState<ServicePaymentPage> {
                           )
                         else
                           _CashMethodCard(method: cashMethod),
+                        if (digitalMethods.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          const Divider(),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Pago digital',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          for (final method in digitalMethods)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: _DigitalMethodCard(
+                                method: method,
+                                onPay: () => _confirmDigitalPayment(method),
+                                submitting: _submitting,
+                              ),
+                            ),
+                        ],
                         if (latestPayment != null) ...[
                           const SizedBox(height: 16),
                           _PaymentInfoBlock(payment: latestPayment),
+                          if (latestPayment.qrPayload != null || latestPayment.qrUrl != null || latestPayment.paymentUrl != null)
+                            _QrPaymentBlock(payment: latestPayment),
                         ],
                         const SizedBox(height: 16),
                         if (!summary.payableNow &&
@@ -282,7 +306,64 @@ class _ServicePaymentPageState extends ConsumerState<ServicePaymentPage> {
       }
     }
   }
+
+  Future<void> _confirmDigitalPayment(PaymentMethodModel method) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('¿Pagar con ${method.nombre}?'),
+        content: const Text(
+          'Se generará una orden de pago digital. Después de pagar, regresa y actualiza el estado.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Generar pago'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      final response = await ref
+          .read(paymentControllerProvider(widget.serviceId).notifier)
+          .initiatePayment(method.idMetodoPago);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            localizeBackendMessage(response.payment.message).isNotEmpty
+                ? localizeBackendMessage(response.payment.message)
+                : 'Orden de pago generada.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_mapPaymentError(error))),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
 }
+
 
 class _CashMethodCard extends StatelessWidget {
   const _CashMethodCard({
@@ -324,6 +405,146 @@ class _CashMethodCard extends StatelessWidget {
                 color: theme.colorScheme.error,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DigitalMethodCard extends StatelessWidget {
+  const _DigitalMethodCard({
+    required this.method,
+    required this.onPay,
+    required this.submitting,
+  });
+
+  final PaymentMethodModel method;
+  final VoidCallback onPay;
+  final bool submitting;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outline),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.qr_code_2_outlined,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(method.nombre),
+                const SizedBox(height: 4),
+                Text(
+                  method.descripcion ?? 'Pago digital mediante ${method.nombre}.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          FilledButton.tonal(
+            onPressed: submitting ? null : onPay,
+            child: const Text('Pagar'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QrPaymentBlock extends StatelessWidget {
+  const _QrPaymentBlock({
+    required this.payment,
+  });
+
+  final PaymentInfoModel payment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Datos de la orden de pago',
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: 12),
+          if (payment.qrUrl != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                payment.qrUrl!,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Text('No se pudo cargar la imagen del QR.'),
+              ),
+            ),
+          if (payment.qrPayload != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: theme.colorScheme.surfaceContainerHighest,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      payment.qrPayload!,
+                      style: theme.textTheme.bodySmall,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy),
+                    tooltip: 'Copiar datos',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: payment.qrPayload!));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Datos copiados al portapapeles.')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (payment.paymentUrl != null) ...[
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () async {
+                final url = Uri.parse(payment.paymentUrl!);
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                } else {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No se pudo abrir el enlace de pago.')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Abrir enlace de pago'),
+            ),
+          ],
         ],
       ),
     );
@@ -391,6 +612,20 @@ PaymentMethodModel? _findCashMethod(List<PaymentMethodModel> methods) {
     }
   }
   return null;
+}
+
+List<PaymentMethodModel> _findDigitalMethods(List<PaymentMethodModel> methods) {
+  return methods.where((method) {
+    if (!method.activo) return false;
+    final name = method.nombre.trim().toUpperCase();
+    return name != 'EFECTIVO' &&
+        (name.contains('QR') ||
+            name.contains('PAGO MOVIL') ||
+            name.contains('PAGO MÓVIL') ||
+            name.contains('TRANSFERENCIA') ||
+            name.contains('TARJETA') ||
+            name.contains('BANCO'));
+  }).toList();
 }
 
 String _mapPaymentError(Object error) {

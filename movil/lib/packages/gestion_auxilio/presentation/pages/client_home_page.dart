@@ -280,6 +280,20 @@ class _ClientHomePageState extends ConsumerState<ClientHomePage> {
           ),
           const SizedBox(height: 12),
           _HomeActionCard(
+            title: 'Historial de servicios',
+            subtitle: 'Consulta pagos, calificaciones y asistencias anteriores.',
+            icon: Icons.history_rounded,
+            onTap: () => context.push(AppRoutes.serviceHistory),
+          ),
+          const SizedBox(height: 12),
+          _HomeActionCard(
+            title: 'Mantenimiento preventivo',
+            subtitle: 'Programa una revisión para tu vehículo.',
+            icon: Icons.event_available_outlined,
+            onTap: () => context.push(AppRoutes.maintenanceAppointments),
+          ),
+          const SizedBox(height: 12),
+          _HomeActionCard(
             title: 'Notificaciones',
             subtitle: 'Revisa avisos sobre solicitudes y servicios.',
             icon: Icons.notifications_none_rounded,

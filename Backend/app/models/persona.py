@@ -138,6 +138,10 @@ class Taller(TimestampMixin, Base):
         "CatalogoServicioTaller",
         back_populates="taller",
     )
+    citas_mantenimiento: Mapped[list[CitaMantenimiento]] = relationship(
+        "CitaMantenimiento",
+        back_populates="taller",
+    )
     gerentes: Mapped[list[GerenteTaller]] = relationship(
         "GerenteTaller",
         back_populates="taller",
@@ -238,6 +242,10 @@ class Cliente(TimestampMixin, Base):
     vehiculos: Mapped[list[Vehiculo]] = relationship("Vehiculo", back_populates="cliente")
     seguros: Mapped[list[Seguro]] = relationship("Seguro", back_populates="cliente")
     incidentes: Mapped[list[Incidente]] = relationship("Incidente", back_populates="cliente")
+    citas_mantenimiento: Mapped[list[CitaMantenimiento]] = relationship(
+        "CitaMantenimiento",
+        back_populates="cliente",
+    )
 
 
 class Administrador(TimestampMixin, Base):

@@ -81,4 +81,8 @@ class Vehiculo(TimestampMixin, Base):
     color: Mapped[Color] = relationship("Color", back_populates="vehiculos")
     cliente: Mapped[Cliente] = relationship("Cliente", back_populates="vehiculos")
     incidentes: Mapped[list[Incidente]] = relationship("Incidente", back_populates="vehiculo")
+    citas_mantenimiento: Mapped[list[CitaMantenimiento]] = relationship(
+        "CitaMantenimiento",
+        back_populates="vehiculo",
+    )
 

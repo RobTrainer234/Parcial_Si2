@@ -11,6 +11,8 @@ class AppRoutes {
   static const profile = '/profile';
   static const notifications = '/notifications';
   static const activeServices = '/services/active';
+  static const serviceHistory = '/services/history';
+  static const maintenanceAppointments = '/maintenance-appointments';
   static const reportIncident = '/incident/report';
   static const incidentReported = '/incident/reported';
   static const pendingIncidents = '/incident/pending';

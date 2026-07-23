@@ -10,6 +10,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 
 import { NotificationApiService as CoreNotificationApi } from '../../../core/notifications/notification-api.service';
+import { NotificationRealtimeService } from '../../../core/notifications/notification-realtime.service';
 import { AppCardComponent } from '../../../shared/components/app-card.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state.component';
@@ -44,6 +45,11 @@ import {
       title="Notificaciones"
       subtitle="Consulta alertas operativas, avisos del sistema y eventos que requieren atencion del taller."
     >
+      <div page-actions class="realtime-badge">
+        <span class="badge" [class.badge--success]="connectionState() === 'connected'" [class.badge--warning]="connectionState() === 'reconnecting'" [class.badge--neutral]="connectionState() === 'disconnected'">
+          {{ connectionState() === 'connected' ? 'En vivo' : connectionState() === 'reconnecting' ? 'Reconectando...' : 'Desconectado' }}
+        </span>
+      </div>
       <div page-actions>
         <button
           type="button"
@@ -240,15 +246,19 @@ import {
       .mb-4 { margin-bottom: var(--space-4); }
       .mt-4 { margin-top: var(--space-4); }
       .mt-3 { margin-top: var(--space-3); }
+      .realtime-badge { display: flex; align-items: center; }
+      .badge--success { background: var(--color-success); color: #fff; }
     `,
   ],
 })
 export class NotificationsPage {
   private readonly api = inject(NotificationsPageApi);
   private readonly coreApi = inject(CoreNotificationApi);
+  private readonly realtime = inject(NotificationRealtimeService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly loading = signal(true);
+  protected readonly connectionState = this.realtime.connectionState;
   protected readonly pageError = signal('');
   protected readonly processingIds = signal<Set<number>>(new Set());
   protected readonly isFiltersVisible = signal(false);
@@ -271,6 +281,17 @@ export class NotificationsPage {
 
   constructor() {
     this.loadNotifications();
+
+    this.realtime.connect();
+
+    this.realtime.events$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        if (event.event === 'notification.created') {
+          this.loadNotifications();
+          this.coreApi.triggerUnreadCountRefresh();
+        }
+      });
   }
 
   protected loadNotifications(): void {

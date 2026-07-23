@@ -40,10 +40,7 @@ from app.packages.gestion_auxilio.notification_types import (
     NOTIFICATION_TYPE_OPERARIO_EN_CAMINO,
     NOTIFICATION_TYPE_SOLICITUD_ACEPTADA,
 )
-from app.packages.gestion_auxilio.service import (
-    _auto_dispatch_notifications,
-    _create_typed_notification,
-)
+
 from app.packages.operaciones_taller.schemas import WorkshopActiveServiceTrackingSummary
 from app.packages.seguridad_usuarios.security import hash_password
 from app.packages.inteligencia_triaje.matchmaking import build_ranked_candidate
@@ -4439,6 +4436,11 @@ def assign_operario_to_service(
     ip_origen: str | None,
     user_agent: str | None,
 ) -> AssignOperarioResponse:
+    from app.packages.gestion_auxilio.service import (
+        _auto_dispatch_notifications,
+        _create_typed_notification,
+    )
+
     service = _get_workshop_service(
         db=db,
         service_id=service_id,
@@ -4634,6 +4636,11 @@ def _accept_workshop_request(
     ip_origen: str | None,
     user_agent: str | None,
 ) -> WorkshopRequestDecisionResponse:
+    from app.packages.gestion_auxilio.service import (
+        _auto_dispatch_notifications,
+        _create_typed_notification,
+    )
+
     if request_row.estado == "ACEPTADA":
         service = request_row.servicio
         if service is None:

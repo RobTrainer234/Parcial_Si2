@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -14,17 +14,22 @@ from app.models import (
     Administrador,
     Bitacora,
     CatalogoServicioTaller,
+    CitaMantenimiento,
+    Cliente,
     DispositivoUsuario,
     Evidencia,
     Incidente,
+    Modelo,
     Notificacion,
     Operario,
     Seguro,
     Servicio,
     ServicioUbicacion,
     SolicitudServicio,
+    Taller,
     TipoCobertura,
     Usuario,
+    Vehiculo,
 )
 from app.packages.inteligencia_triaje.matchmaking import build_ranked_candidate
 from app.packages.inteligencia_triaje.diagnosis_utils import (
@@ -46,6 +51,8 @@ from .notification_types import (
 from .push_provider import PushProviderError, send_push_notification
 from .schemas import (
     ClientActiveServiceSummaryResponse,
+    ClientServiceHistoryDetailResponse,
+    ClientServiceHistorySummaryResponse,
     DeviceRegistrationRequest,
     DeviceRegistrationResponse,
     DeviceUnregisterRequest,
@@ -63,6 +70,11 @@ from .schemas import (
     IncidentDiagnosisSummaryResponse,
     IncidentRecommendationsResponse,
     MarkAllReadResponse,
+    MaintenanceAppointmentCreateRequest,
+    MaintenanceAppointmentResponse,
+    MaintenanceAppointmentUpdateRequest,
+    MaintenanceAppointmentWorkshopActionRequest,
+    MaintenanceWorkshopOptionResponse,
     RecommendedWorkshopResponse,
     ServicePrequotationResponse,
     NotificationInboxItem,
@@ -3142,3 +3154,285 @@ def decide_service_finalization(
         final_evidence_count=final_evidence_count,
         message="Service finalization rejected and returned to repair.",
     )
+
+
+def _vehicle_label(vehicle: Vehiculo) -> str:
+    return f"{vehicle.modelo.marca.nombre} {vehicle.modelo.nombre} ({vehicle.placa})"
+
+
+def _operator_name(service: Servicio) -> str | None:
+    if service.operario is None or service.operario.persona is None:
+        return None
+    return f"{service.operario.persona.nombre} {service.operario.persona.apellido}".strip()
+
+
+def _client_history_query():
+    return (
+        select(Servicio)
+        .join(Servicio.solicitud)
+        .join(SolicitudServicio.incidente)
+        .options(
+            joinedload(Servicio.solicitud).joinedload(SolicitudServicio.incidente).joinedload(Incidente.vehiculo).joinedload(Vehiculo.modelo).joinedload(Modelo.marca),
+            joinedload(Servicio.solicitud).joinedload(SolicitudServicio.taller),
+            joinedload(Servicio.operario).joinedload(Operario.persona),
+            joinedload(Servicio.pago),
+            selectinload(Servicio.calificaciones),
+            joinedload(Servicio.informe),
+        )
+    )
+
+
+def _build_client_history_summary(service: Servicio, *, client_id: int) -> ClientServiceHistorySummaryResponse:
+    incident = service.solicitud.incidente
+    vehicle = incident.vehiculo
+    client_rating = next((rating for rating in service.calificaciones if rating.id_emisor == client_id), None)
+    payment = service.pago
+    return ClientServiceHistorySummaryResponse(
+        service_id=service.id_servicio,
+        service_state=service.estado,
+        incident_id=incident.id_incidente,
+        vehicle_id=vehicle.id_vehiculo,
+        vehicle_label=_vehicle_label(vehicle),
+        workshop_name=service.solicitud.taller.nombre_comercial,
+        operario_name=_operator_name(service),
+        detected_specialty=incident.especialidad_detectada.nombre if incident.especialidad_detectada else None,
+        ai_summary=incident.diagnostico_ia_resumen,
+        prequotation_min=service.monto_precotizado_min,
+        prequotation_max=service.monto_precotizado_max,
+        final_amount=service.costo_total or (payment.monto if payment else None),
+        payment_status=payment.estado if payment else None,
+        rating=client_rating.estrellas if client_rating else None,
+        created_at=service.created_at,
+        completed_at=service.fecha_fin,
+        paid_at=payment.fecha_confirmacion if payment else None,
+    )
+
+
+def list_client_service_history(
+    *,
+    current_user: Usuario,
+    db: Session,
+    state_filter: str | None = None,
+    vehicle_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[ClientServiceHistorySummaryResponse]:
+    query = _client_history_query().where(Incidente.id_cliente == current_user.id_persona)
+    if state_filter:
+        query = query.where(Servicio.estado == state_filter.strip().upper())
+    if vehicle_id is not None:
+        query = query.where(Incidente.id_vehiculo == vehicle_id)
+    services = list(
+        db.scalars(
+            query.order_by(Servicio.created_at.desc()).offset(offset).limit(min(limit, 100))
+        ).unique()
+    )
+    return [_build_client_history_summary(service, client_id=current_user.id_persona) for service in services]
+
+
+def get_client_service_history_detail(
+    *,
+    service_id: int,
+    current_user: Usuario,
+    db: Session,
+) -> ClientServiceHistoryDetailResponse:
+    service = db.scalar(
+        _client_history_query().where(
+            Servicio.id_servicio == service_id,
+            Incidente.id_cliente == current_user.id_persona,
+        )
+    )
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found.")
+    summary = _build_client_history_summary(service, client_id=current_user.id_persona)
+    report = service.informe
+    payment = service.pago
+    return ClientServiceHistoryDetailResponse(
+        **summary.model_dump(),
+        incident_description=service.solicitud.incidente.descripcion_cliente,
+        payment_method=payment.metodo.nombre if payment and payment.metodo else None,
+        payment_receipt=payment.comprobante if payment else service.comprobante,
+        work_performed=report.accion_realizada if report else None,
+        physical_diagnosis=report.diagnostico_fisico if report else None,
+        observations=report.observaciones if report else service.observaciones_cierre,
+        recommendations=report.recomendaciones if report else None,
+    )
+
+
+def _appointment_response(appointment: CitaMantenimiento) -> MaintenanceAppointmentResponse:
+    vehicle = appointment.vehiculo
+    client_name = None
+    if appointment.cliente.persona is not None:
+        client_name = f"{appointment.cliente.persona.nombre} {appointment.cliente.persona.apellido}".strip()
+    return MaintenanceAppointmentResponse(
+        appointment_id=appointment.id_cita,
+        status=appointment.estado,
+        scheduled_at=appointment.fecha_hora,
+        reason=appointment.motivo,
+        client_notes=appointment.notas_cliente,
+        workshop_notes=appointment.notas_taller,
+        created_at=appointment.created_at,
+        vehicle_id=vehicle.id_vehiculo,
+        vehicle_label=_vehicle_label(vehicle),
+        workshop_id=appointment.id_taller,
+        workshop_name=appointment.taller.nombre_comercial,
+        catalog_service_id=appointment.id_catalogo_servicio,
+        catalog_service_name=appointment.catalogo_servicio.nombre if appointment.catalogo_servicio else None,
+        customer_name=client_name,
+    )
+
+
+def _create_appointment_notification(
+    *,
+    db: Session,
+    user: Usuario,
+    appointment: CitaMantenimiento,
+    title: str,
+    message: str,
+) -> None:
+    db.add(
+        Notificacion(
+            id_usuario=user.id_usuario,
+            canal="WEB",
+            titulo=title,
+            mensaje=message,
+            payload={
+                "type": "MANTENIMIENTO_PREVENTIVO",
+                "appointment_id": appointment.id_cita,
+                "workshop_id": appointment.id_taller,
+                "route_suggested": "/admin/maintenance-appointments",
+            },
+            estado="PENDIENTE",
+        )
+    )
+
+
+def _appointment_query():
+    return select(CitaMantenimiento).options(
+        joinedload(CitaMantenimiento.vehiculo).joinedload(Vehiculo.modelo).joinedload(Modelo.marca),
+        joinedload(CitaMantenimiento.taller),
+        joinedload(CitaMantenimiento.catalogo_servicio),
+        joinedload(CitaMantenimiento.cliente).joinedload(Cliente.persona),
+    )
+
+
+def list_client_maintenance_appointments(*, current_user: Usuario, db: Session) -> list[MaintenanceAppointmentResponse]:
+    appointments = list(
+        db.scalars(
+            _appointment_query()
+            .where(CitaMantenimiento.id_cliente == current_user.id_persona)
+            .order_by(CitaMantenimiento.fecha_hora.desc())
+        ).unique()
+    )
+    return [_appointment_response(item) for item in appointments]
+
+
+def list_maintenance_workshops(*, db: Session) -> list[MaintenanceWorkshopOptionResponse]:
+    workshops = list(db.scalars(select(Taller).where(Taller.activo.is_(True)).order_by(Taller.nombre_comercial.asc())))
+    return [
+        MaintenanceWorkshopOptionResponse(
+            workshop_id=workshop.id_taller,
+            workshop_name=workshop.nombre_comercial,
+            city=workshop.ciudad,
+        )
+        for workshop in workshops
+    ]
+
+
+def create_maintenance_appointment(*, payload: MaintenanceAppointmentCreateRequest, current_user: Usuario, db: Session) -> MaintenanceAppointmentResponse:
+    if payload.scheduled_at <= utc_now():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Appointment date must be in the future.")
+    vehicle = db.scalar(select(Vehiculo).where(Vehiculo.id_vehiculo == payload.vehicle_id, Vehiculo.id_persona == current_user.id_persona))
+    if vehicle is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found.")
+    workshop = db.scalar(select(Taller).where(Taller.id_taller == payload.workshop_id, Taller.activo.is_(True)))
+    if workshop is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workshop not found.")
+    catalog = None
+    if payload.catalog_service_id is not None:
+        catalog = db.scalar(select(CatalogoServicioTaller).where(CatalogoServicioTaller.id_catalogo_servicio == payload.catalog_service_id, CatalogoServicioTaller.id_taller == workshop.id_taller, CatalogoServicioTaller.activo.is_(True)))
+        if catalog is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Catalog service is not available for this workshop.")
+    appointment = CitaMantenimiento(
+        id_cliente=current_user.id_persona,
+        id_vehiculo=vehicle.id_vehiculo,
+        id_taller=workshop.id_taller,
+        id_catalogo_servicio=catalog.id_catalogo_servicio if catalog else None,
+        fecha_hora=payload.scheduled_at,
+        motivo=payload.reason,
+        notas_cliente=payload.client_notes,
+    )
+    db.add(appointment)
+    db.flush()
+    for admin_user in _get_workshop_admin_users(db, workshop_id=workshop.id_taller):
+        _create_appointment_notification(
+            db=db,
+            user=admin_user,
+            appointment=appointment,
+            title="Nueva cita preventiva",
+            message=f"Se solicitó una cita de mantenimiento para {appointment.fecha_hora:%d/%m/%Y %H:%M}.",
+        )
+    db.commit()
+    return _appointment_response(db.scalar(_appointment_query().where(CitaMantenimiento.id_cita == appointment.id_cita)))
+
+
+def update_client_maintenance_appointment(*, appointment_id: int, payload: MaintenanceAppointmentUpdateRequest, current_user: Usuario, db: Session) -> MaintenanceAppointmentResponse:
+    appointment = db.scalar(_appointment_query().where(CitaMantenimiento.id_cita == appointment_id, CitaMantenimiento.id_cliente == current_user.id_persona))
+    if appointment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found.")
+    if appointment.estado not in {"PENDIENTE", "CONFIRMADA"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Appointment cannot be changed in its current state.")
+    if payload.scheduled_at is not None:
+        if payload.scheduled_at <= utc_now():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Appointment date must be in the future.")
+        appointment.fecha_hora = payload.scheduled_at
+    if payload.reason is not None:
+        appointment.motivo = payload.reason
+    if payload.client_notes is not None:
+        appointment.notas_cliente = payload.client_notes
+    db.commit()
+    db.refresh(appointment)
+    return _appointment_response(appointment)
+
+
+def cancel_client_maintenance_appointment(*, appointment_id: int, current_user: Usuario, db: Session) -> MaintenanceAppointmentResponse:
+    appointment = db.scalar(_appointment_query().where(CitaMantenimiento.id_cita == appointment_id, CitaMantenimiento.id_cliente == current_user.id_persona))
+    if appointment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found.")
+    if appointment.estado not in {"PENDIENTE", "CONFIRMADA"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Appointment cannot be cancelled in its current state.")
+    appointment.estado = "CANCELADA"
+    db.commit()
+    return _appointment_response(appointment)
+
+
+def list_workshop_maintenance_appointments(*, workshop_id: int, db: Session) -> list[MaintenanceAppointmentResponse]:
+    appointments = list(db.scalars(_appointment_query().where(CitaMantenimiento.id_taller == workshop_id).order_by(CitaMantenimiento.fecha_hora.asc())).unique())
+    return [_appointment_response(item) for item in appointments]
+
+
+def change_workshop_maintenance_appointment_status(*, appointment_id: int, workshop_id: int, new_status: str, payload: MaintenanceAppointmentWorkshopActionRequest, db: Session) -> MaintenanceAppointmentResponse:
+    appointment = db.scalar(_appointment_query().where(CitaMantenimiento.id_cita == appointment_id, CitaMantenimiento.id_taller == workshop_id))
+    if appointment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found.")
+    transitions = {"CONFIRMADA": {"PENDIENTE"}, "RECHAZADA": {"PENDIENTE"}, "COMPLETADA": {"CONFIRMADA"}}
+    if appointment.estado not in transitions[new_status]:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Appointment is not in a valid state for this action.")
+    appointment.estado = new_status
+    appointment.notas_taller = payload.workshop_notes
+    client_user = db.scalar(select(Usuario).where(Usuario.id_persona == appointment.id_cliente))
+    if client_user is not None:
+        labels = {
+            "CONFIRMADA": "Cita confirmada",
+            "RECHAZADA": "Cita rechazada",
+            "COMPLETADA": "Mantenimiento completado",
+        }
+        _create_appointment_notification(
+            db=db,
+            user=client_user,
+            appointment=appointment,
+            title=labels[new_status],
+            message=f"Tu cita de mantenimiento en {appointment.taller.nombre_comercial} cambió a {new_status.lower()}.",
+        )
+    db.commit()
+    return _appointment_response(appointment)

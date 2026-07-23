@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 
 import { AuthService } from '../../auth/auth.service';
 import { NotificationApiService } from '../../notifications/notification-api.service';
+import { NotificationRealtimeService } from '../../notifications/notification-realtime.service';
 import { ThemeService } from '../../theme/theme.service';
 
 @Component({
@@ -181,6 +182,7 @@ export class AdminTopbarComponent {
   private readonly authService = inject(AuthService);
   private readonly themeService = inject(ThemeService);
   private readonly notificationApi = inject(NotificationApiService);
+  private readonly notificationRealtime = inject(NotificationRealtimeService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly unreadCountState = signal(0);
 
@@ -219,6 +221,16 @@ export class AdminTopbarComponent {
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe(() => {
           this.loadUnreadCount();
+        });
+
+      this.notificationRealtime.connect();
+
+      this.notificationRealtime.events$
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((event) => {
+          if (event.event === 'notification.created') {
+            this.loadUnreadCount();
+          }
         });
     }
   }
