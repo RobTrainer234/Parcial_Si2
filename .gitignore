@@ -63,7 +63,9 @@ Backend/media/
 # PERMITIR ARCHIVOS DE EJEMPLO DE VARIABLES
 # =========================
 !.env.example
+!.env.prod.example
 !**/.env.example
+!**/.env.prod.example
 
 # =========================
 # ARCHIVOS LOCALES QUE NO QUIERO SUBIR
